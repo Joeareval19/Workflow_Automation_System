@@ -1,0 +1,105 @@
+# Define the base path where the week folders are located
+$basePath = "C:\Users\User\Desktop\JEAV\EDI Reconcile (Monday)"
+
+# Define the format of the week folder name
+$folderNamePattern = "Week_{0}_({1})_({2})"
+
+# Function to add days to a date string
+function Add-DaysToDate {
+    param (
+        [string]$dateStr,
+        [int]$days
+    )
+    $date = [datetime]::ParseExact($dateStr, "MM.dd.yy", $null)
+    $newDate = $date.AddDays($days)
+    return $newDate.ToString("MM.dd.yy")
+}
+
+# Function to update date within file names
+function Update-DateInFileName {
+    param (
+        [string]$fileName,
+        [string]$oldDateFormatStart,
+        [string]$oldDateFormatEnd,
+        [string]$newDateStart,
+        [string]$newDateEnd
+    )
+    $updatedFileName = $fileName -replace [regex]::Escape($oldDateFormatStart), $newDateStart
+    $updatedFileName = $updatedFileName -replace [regex]::Escape($oldDateFormatEnd), $newDateEnd
+    return $updatedFileName
+}
+
+# Get the list of week folders in the base path
+$weekFolders = Get-ChildItem -Path $basePath -Directory | Where-Object { $_.Name -match "^Week_(\d+)_\((\d{2}\.\d{2}\.\d{2})\)_\((\d{2}\.\d{2}\.\d{2})\)$" }
+
+# Initialize variables for the new week number and date range
+$newWeekNumber = 1
+$newStartDate = Get-Date
+$newEndDate = $newStartDate.AddDays(6)
+
+# Initialize variable for the latest folder to copy from
+$latestFolderPath = ""
+
+# Find the highest week number and get the latest folder to copy from
+foreach ($folder in $weekFolders) {
+    if ($folder.Name -match "Week_(\d+)_\((\d{2}\.\d{2}\.\d{2})\)_\((\d{2}\.\d{2}\.\d{2})\)$") {
+        $weekNumber = [int]$matches[1]
+        $endDate = [datetime]::ParseExact($matches[3], "MM.dd.yy", $null)
+        if ($weekNumber -ge $newWeekNumber) {
+            $newWeekNumber = $weekNumber + 1
+            # Calculate new start and end dates based on the last week's end date
+            $newStartDate = $endDate.AddDays(1)
+            $newEndDate = $newStartDate.AddDays(6)
+            $latestFolderPath = $folder.FullName
+        }
+    }
+}
+
+# Adjust end date if it falls into the next month
+if ($newEndDate.Day -gt [datetime]::DaysInMonth($newEndDate.Year, $newEndDate.Month)) {
+    $newEndDate = [datetime]::ParseExact($newStartDate.ToString("yyyy-MM") + "-01", "yyyy-MM-dd", $null).AddMonths(1).AddDays(-1)
+}
+
+# Format the new week number and date range
+$newStartDateString = $newStartDate.ToString("MM.dd.yy")
+$newEndDateString = $newEndDate.ToString("MM.dd.yy")
+
+# Construct the new folder name
+$newFolderName = [string]::Format($folderNamePattern, $newWeekNumber, $newStartDateString, $newEndDateString)
+
+# Define the full path for the new folder
+$newFolderPath = Join-Path -Path $basePath -ChildPath $newFolderName
+
+# Create the new folder
+New-Item -Path $newFolderPath -ItemType Directory -Force
+
+# Copy and rename contents from the latest folder to the new folder
+if ($latestFolderPath) {
+    Get-ChildItem -Path $latestFolderPath -Recurse | ForEach-Object {
+        $destPath = $_.FullName.Replace($latestFolderPath, $newFolderPath)
+        if ($_.PSIsContainer) {
+            New-Item -Path $destPath -ItemType Directory -Force
+        } else {
+            $newFileName = $_.Name
+
+            # Update both start and end dates in file names using dynamic patterns
+            $oldStartDate = [datetime]::ParseExact($matches[2], "MM.dd.yy", $null).ToString("MM.dd.yy")
+            $oldEndDate = [datetime]::ParseExact($matches[3], "MM.dd.yy", $null).ToString("MM.dd.yy")
+
+            $newFileName = Update-DateInFileName -fileName $newFileName -oldDateFormatStart $oldStartDate -oldDateFormatEnd $oldEndDate -newDateStart $newStartDateString -newDateEnd $newEndDateString
+
+            $newFilePath = Join-Path -Path (Split-Path -Path $destPath -Parent) -ChildPath $newFileName
+
+            # Copy and rename file
+            Copy-Item -Path $_.FullName -Destination $newFilePath -Force
+        }
+    }
+}
+
+# Output results
+Write-Host "Created new folder and copied contents with updated names: $newFolderPath"
+
+# Log the creation
+$logFile = "C:\Users\User\Desktop\JEAV\EDI Reconcile (Monday)\logfile.txt"  # Change this path if necessary
+$timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+"$timestamp - Created new folder and copied contents with updated names: $newFolderPath" | Out-File -Append -FilePath $logFile
