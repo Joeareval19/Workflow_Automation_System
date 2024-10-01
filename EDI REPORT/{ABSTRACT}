@@ -1,0 +1,18 @@
+--
+Jose Ernesto Arevalo
+October 1, 2024
+EDI Reprot Abstract & Instructions
+--
+
+ABSTRACT
+This report is designed to compile all open invoices within a specified period from the company’s CRM system and facilitate the upload of relevant data to accounting software such as QuickBooks (QB). The primary objective of this report is to ensure accurate reconciliation between teams and to prevent the upload of manually processed invoices. The report follows a standardized structure that promotes consistency in customer information and ensures data is sourced directly from the origin. It is generated on a weekly basis, typically every Monday. Critical details such as invoice dates, amounts, and invoice numbers require careful attention to maintain accuracy. Ultimately, this report plays a key role in ensuring precise and timely accounting reconciliation, enabling informed financial decision-making.
+
+
+INSTRUCTIONS:
+1: (Gather Data)           > Download the previous weeks INV data, SAT-FRI.
+2: (Clean Data)            > Remove (Duties, Curlmix, TRG...)
+3: (Validate Data)         > Assure data from Customer Care matches report
+4: (Generate QB Report)    > Generate Unique INV & BILLs for both ILS & SHIP
+5: (Upload Report)         > Add reports to Transaction Pro, and ensure they are uploaded appropriately and no errors occure. 
+
+ 
