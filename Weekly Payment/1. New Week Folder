@@ -1,0 +1,90 @@
+# Define the base path where the week folders are located
+$basePath = "C:\Users\User\Desktop\JEAV\Weekly Payments Reconcile (daily)\RS vs QB"
+
+# Function to get the next week number and dates
+function Get-NextWeekInfo {
+    param (
+        [string]$currentFolderName
+    )
+    if ($currentFolderName -match "Week_(\d+)_\((\d{2}\.\d{2}\.\d{2})\)_\((\d{2}\.\d{2}\.\d{2})\)$") {
+        $currentWeekNumber = [int]$matches[1]
+        $currentEndDate = [datetime]::ParseExact($matches[3], "MM.dd.yy", $null)
+        
+        $nextWeekNumber = $currentWeekNumber + 1
+        $nextStartDate = $currentEndDate.AddDays(1)
+        $nextEndDate = $nextStartDate.AddDays(6)
+        
+        return @{
+            WeekNumber = $nextWeekNumber
+            StartDate = $nextStartDate.ToString("MM.dd.yy")
+            EndDate = $nextEndDate.ToString("MM.dd.yy")
+        }
+    }
+    throw "Invalid folder name format"
+}
+
+# Function to update date within file names
+function Update-DateInFileName {
+    param (
+        [string]$fileName,
+        [string]$oldStartDate,
+        [string]$oldEndDate,
+        [string]$newStartDate,
+        [string]$newEndDate
+    )
+    $updatedFileName = $fileName.Replace("_($oldStartDate)_($oldEndDate)", "_($newStartDate)_($newEndDate)")
+    return $updatedFileName
+}
+
+# Get the latest week folder
+$latestFolder = Get-ChildItem -Path $basePath -Directory | 
+                Where-Object { $_.Name -match "^Week_\d+_\(\d{2}\.\d{2}\.\d{2}\)_\(\d{2}\.\d{2}\.\d{2}\)$" } | 
+                Sort-Object Name -Descending | 
+                Select-Object -First 1
+
+if (-not $latestFolder) {
+    Write-Error "No valid week folders found in the specified path."
+    exit
+}
+
+# Get information for the next week
+$nextWeekInfo = Get-NextWeekInfo -currentFolderName $latestFolder.Name
+
+# Extract old dates from the latest folder name
+if ($latestFolder.Name -match "_\((\d{2}\.\d{2}\.\d{2})\)_\((\d{2}\.\d{2}\.\d{2})\)$") {
+    $oldStartDate = $matches[1]
+    $oldEndDate = $matches[2]
+}
+
+# Create the new folder name
+$newFolderName = "Week_$($nextWeekInfo.WeekNumber)_($($nextWeekInfo.StartDate))_($($nextWeekInfo.EndDate))"
+$newFolderPath = Join-Path -Path $basePath -ChildPath $newFolderName
+
+# Create the new folder
+New-Item -Path $newFolderPath -ItemType Directory -Force
+
+# Copy and rename contents from the latest folder to the new folder
+Get-ChildItem -Path $latestFolder.FullName -Recurse | ForEach-Object {
+    $destPath = $_.FullName.Replace($latestFolder.FullName, $newFolderPath)
+    if ($_.PSIsContainer) {
+        New-Item -Path $destPath -ItemType Directory -Force
+    } else {
+        $newFileName = Update-DateInFileName -fileName $_.Name `
+                                             -oldStartDate $oldStartDate `
+                                             -oldEndDate $oldEndDate `
+                                             -newStartDate $nextWeekInfo.StartDate `
+                                             -newEndDate $nextWeekInfo.EndDate
+        $newFilePath = Join-Path -Path (Split-Path -Path $destPath -Parent) -ChildPath $newFileName
+
+        # Copy and rename file
+        Copy-Item -Path $_.FullName -Destination $newFilePath -Force
+    }
+}
+
+# Output results
+Write-Host "Created new folder and copied contents with updated names: $newFolderPath"
+
+# Log the creation
+$logFile = Join-Path -Path $basePath -ChildPath "logfile.txt"
+$timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+"$timestamp - Created new folder and copied contents with updated names: $newFolderPath" | Out-File -Append -FilePath $logFile
