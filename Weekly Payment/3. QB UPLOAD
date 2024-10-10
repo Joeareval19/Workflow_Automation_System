@@ -1,0 +1,145 @@
+# Define file paths
+$inputFilePath = "C:\Users\User\Desktop\JEAV\Weekly Payments Reconcile (daily)\RS vs QB\Week_37_(09.08.24)_(09.14.24)\1.Gathering\RAW_(09.08.24)_(09.14.24)csv.csv"
+$customerListPath = "C:\Users\User\Desktop\JEAV\Customer List.csv"
+$outputFilePath = [System.IO.Path]::Combine([System.Environment]::GetFolderPath('Desktop'), 'GeneratedReport.csv')
+$logFilePath = [System.IO.Path]::Combine([System.Environment]::GetFolderPath('Desktop'), 'ProcessingLog.txt')
+
+# Initialize log file
+if (Test-Path $logFilePath) { Remove-Item $logFilePath }
+New-Item -Path $logFilePath -ItemType File -Force | Out-Null
+
+# Import the CSV files with error handling
+try {
+    $data = Import-Csv -Path $inputFilePath -ErrorAction Stop
+    $customerList = Import-Csv -Path $customerListPath -ErrorAction Stop
+} catch {
+    Write-Host "Error importing CSV files: $_" -ForegroundColor Red
+    Exit
+}
+
+# Create a hashtable for customer matching
+$customerHash = @{}
+foreach ($customer in $customerList) {
+    $customerHash[$customer.'Customer Id'] = $customer.Customer
+}
+
+# Initialize lists for logging
+$reallocatedInvoices = @()
+$missingPaymentMethods = @()
+
+# Process data to generate report
+$report = $data | ForEach-Object {
+
+    # Skip rows based on conditions
+    if ($_.Customer -eq 'CARIB GROW INC') { return }
+    if ($_. 'Check #' -like '*CC*') { return }
+    if ($_.Notes -match 'prepaid|prepay') { return }
+
+    # Remove invoices with "reallocated" or "re-allocated" in Notes
+    if ($_.Notes -match 'reallocated|re-allocated') {
+        $reallocatedInvoices += $_.'Invoice Id(s)'
+        return
+    }
+
+    $customerId = $_.'Customer Id'
+
+    # Check if customer exists in Customer List, if not, set to "N/A"
+    $customerName = if ($customerHash.ContainsKey($customerId)) {
+        $customerHash[$customerId]
+    } else {
+        "N/A"
+    }
+
+    # Determine payment method based on 'Check #' (column C)
+    $paymentMethod = switch -Regex ($_. 'Check #') {
+        '^\d+$' { "CHECK" }
+        'visa' { "VISA" }
+        '^AME' { "AMEX" }
+        '^DIS' { "DISCOVER" }
+        'ACH|TRA' { "ACH" }
+        '^MASTER' { "MASTERCARD" }
+        Default {
+            $missingPaymentMethods += $_.'Invoice Id(s)'
+            "Unknown"
+        }
+    }
+
+    # Determine memo field: Notes if present, otherwise use Invoice Id(s)
+    $memo = if ([string]::IsNullOrWhiteSpace($_.Notes)) {
+        $_.'Invoice Id(s)'
+    } else {
+        $_.Notes
+    }
+
+    # Get the Invoice Id(s) and remove the first 4 characters for APPLY_TO_INVOICE
+    $invoiceId = $_.'Invoice Id(s)'
+    $applyToInvoice = if ($invoiceId.Length -gt 4) {
+        $invoiceId.Substring(4)
+    } else {
+        $invoiceId
+    }
+
+    # Compute REF NO based on PAYMENT METHOD and Invoice Id(s)
+    switch ($paymentMethod) {
+        "CHECK" {
+            $refNo = "5-" + ($invoiceId.Substring(0, [Math]::Min(8, $invoiceId.Length)))
+        }
+        "VISA" {
+            $refNo = "4-" + ($invoiceId.Substring(0, [Math]::Min(8, $invoiceId.Length)))
+        }
+        "MASTERCARD" {
+            $refNo = "4-" + ($invoiceId.Substring(0, [Math]::Min(8, $invoiceId.Length)))
+        }
+        "DISCOVER" {
+            $refNo = "4-" + ($invoiceId.Substring(0, [Math]::Min(8, $invoiceId.Length)))
+        }
+        "AMEX" {
+            $refNo = "3-" + ($invoiceId.Substring(0, [Math]::Min(8, $invoiceId.Length)))
+        }
+        "ACH" {
+            $refNo = "6-" + ($invoiceId.Substring([Math]::Max(0, $invoiceId.Length - 8), [Math]::Min(8, $invoiceId.Length)))
+        }
+        Default {
+            $refNo = ""
+        }
+    }
+
+    # Create a custom object for each row in the report
+    [PSCustomObject]@{
+        CUSTOMER          = $customerName        # Customer name or "N/A" if not found
+        'REF NO'          = $refNo               # Computed as per new logic
+        DATE              = $_.'Payment Date'    # Payment Date from RAW
+        'PAYMENT METHOD'  = $paymentMethod       # Determine payment method
+        APPLY_TO_INVOICE  = $applyToInvoice      # Invoice Id(s) without the first 4 characters
+        AMOUNT            = $_.Amount            # Amount column N
+        DEPOSIT_TO        = '15000'              # Static value
+        MEMO              = $memo                # Notes if present, else Invoice Id(s)
+    }
+}
+
+# Export the report to a new CSV file on the Desktop
+try {
+    $report | Export-Csv -Path $outputFilePath -NoTypeInformation -Force
+    Write-Host "Report generated and saved to: $outputFilePath" -ForegroundColor Green
+} catch {
+    Write-Host "Error exporting CSV file: $_" -ForegroundColor Red
+}
+
+# Log reallocated invoices
+if ($reallocatedInvoices.Count -gt 0) {
+    Add-Content -Path $logFilePath -Value "Reallocated Invoices Removed:"
+    $reallocatedInvoices | ForEach-Object { Add-Content -Path $logFilePath -Value $_ }
+}
+
+# Log missing payment methods
+if ($missingPaymentMethods.Count -gt 0) {
+    Add-Content -Path $logFilePath -Value "`nInvoices with Missing Payment Methods:"
+    $missingPaymentMethods | ForEach-Object { Add-Content -Path $logFilePath -Value $_ }
+}
+
+# Display log file path if there are any logged issues
+if (($reallocatedInvoices.Count -gt 0) -or ($missingPaymentMethods.Count -gt 0)) {
+    Write-Host "Processing completed with some notes. Please check the log file at: $logFilePath" -ForegroundColor Yellow
+} else {
+    Write-Host "Processing completed successfully with no issues." -ForegroundColor Green
+}
