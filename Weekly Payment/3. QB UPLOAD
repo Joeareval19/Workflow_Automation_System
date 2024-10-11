@@ -1,145 +1,289 @@
-# Define file paths
-$inputFilePath = "C:\Users\User\Desktop\JEAV\Weekly Payments Reconcile (daily)\RS vs QB\Week_37_(09.08.24)_(09.14.24)\1.Gathering\RAW_(09.08.24)_(09.14.24)csv.csv"
-$customerListPath = "C:\Users\User\Desktop\JEAV\Customer List.csv"
-$outputFilePath = [System.IO.Path]::Combine([System.Environment]::GetFolderPath('Desktop'), 'GeneratedReport.csv')
-$logFilePath = [System.IO.Path]::Combine([System.Environment]::GetFolderPath('Desktop'), 'ProcessingLog.txt')
+#========= #Dynamic Path Configuration #=========
+# Base path configuration
+$basePath = "C:\Users\User\Desktop\JEAV"
+$rsVsQbPath = Join-Path $basePath "Weekly Payments Reconcile (daily)\RS vs QB"
 
-# Initialize log file
-if (Test-Path $logFilePath) { Remove-Item $logFilePath }
-New-Item -Path $logFilePath -ItemType File -Force | Out-Null
+# Get the latest week folder
+$latestWeekFolder = Get-ChildItem -Path $rsVsQbPath -Directory |
+    Where-Object { $_.Name -match "Week_\d+_\(\d{2}\.\d{2}\.\d{2}\)_\(\d{2}\.\d{2}\.\d{2}\)" } |
+    Sort-Object CreationTime -Descending |
+    Select-Object -First 1
 
-# Import the CSV files with error handling
-try {
-    $data = Import-Csv -Path $inputFilePath -ErrorAction Stop
-    $customerList = Import-Csv -Path $customerListPath -ErrorAction Stop
-} catch {
-    Write-Host "Error importing CSV files: $_" -ForegroundColor Red
-    Exit
+if (-not $latestWeekFolder) {
+    throw "No valid week folder found in the specified directory"
 }
 
-# Create a hashtable for customer matching
-$customerHash = @{}
-foreach ($customer in $customerList) {
-    $customerHash[$customer.'Customer Id'] = $customer.Customer
-}
-
-# Initialize lists for logging
-$reallocatedInvoices = @()
-$missingPaymentMethods = @()
-
-# Process data to generate report
-$report = $data | ForEach-Object {
-
-    # Skip rows based on conditions
-    if ($_.Customer -eq 'CARIB GROW INC') { return }
-    if ($_. 'Check #' -like '*CC*') { return }
-    if ($_.Notes -match 'prepaid|prepay') { return }
-
-    # Remove invoices with "reallocated" or "re-allocated" in Notes
-    if ($_.Notes -match 'reallocated|re-allocated') {
-        $reallocatedInvoices += $_.'Invoice Id(s)'
-        return
-    }
-
-    $customerId = $_.'Customer Id'
-
-    # Check if customer exists in Customer List, if not, set to "N/A"
-    $customerName = if ($customerHash.ContainsKey($customerId)) {
-        $customerHash[$customerId]
-    } else {
-        "N/A"
-    }
-
-    # Determine payment method based on 'Check #' (column C)
-    $paymentMethod = switch -Regex ($_. 'Check #') {
-        '^\d+$' { "CHECK" }
-        'visa' { "VISA" }
-        '^AME' { "AMEX" }
-        '^DIS' { "DISCOVER" }
-        'ACH|TRA' { "ACH" }
-        '^MASTER' { "MASTERCARD" }
-        Default {
-            $missingPaymentMethods += $_.'Invoice Id(s)'
-            "Unknown"
-        }
-    }
-
-    # Determine memo field: Notes if present, otherwise use Invoice Id(s)
-    $memo = if ([string]::IsNullOrWhiteSpace($_.Notes)) {
-        $_.'Invoice Id(s)'
-    } else {
-        $_.Notes
-    }
-
-    # Get the Invoice Id(s) and remove the first 4 characters for APPLY_TO_INVOICE
-    $invoiceId = $_.'Invoice Id(s)'
-    $applyToInvoice = if ($invoiceId.Length -gt 4) {
-        $invoiceId.Substring(4)
-    } else {
-        $invoiceId
-    }
-
-    # Compute REF NO based on PAYMENT METHOD and Invoice Id(s)
-    switch ($paymentMethod) {
-        "CHECK" {
-            $refNo = "5-" + ($invoiceId.Substring(0, [Math]::Min(8, $invoiceId.Length)))
-        }
-        "VISA" {
-            $refNo = "4-" + ($invoiceId.Substring(0, [Math]::Min(8, $invoiceId.Length)))
-        }
-        "MASTERCARD" {
-            $refNo = "4-" + ($invoiceId.Substring(0, [Math]::Min(8, $invoiceId.Length)))
-        }
-        "DISCOVER" {
-            $refNo = "4-" + ($invoiceId.Substring(0, [Math]::Min(8, $invoiceId.Length)))
-        }
-        "AMEX" {
-            $refNo = "3-" + ($invoiceId.Substring(0, [Math]::Min(8, $invoiceId.Length)))
-        }
-        "ACH" {
-            $refNo = "6-" + ($invoiceId.Substring([Math]::Max(0, $invoiceId.Length - 8), [Math]::Min(8, $invoiceId.Length)))
-        }
-        Default {
-            $refNo = ""
-        }
-    }
-
-    # Create a custom object for each row in the report
-    [PSCustomObject]@{
-        CUSTOMER          = $customerName        # Customer name or "N/A" if not found
-        'REF NO'          = $refNo               # Computed as per new logic
-        DATE              = $_.'Payment Date'    # Payment Date from RAW
-        'PAYMENT METHOD'  = $paymentMethod       # Determine payment method
-        APPLY_TO_INVOICE  = $applyToInvoice      # Invoice Id(s) without the first 4 characters
-        AMOUNT            = $_.Amount            # Amount column N
-        DEPOSIT_TO        = '15000'              # Static value
-        MEMO              = $memo                # Notes if present, else Invoice Id(s)
-    }
-}
-
-# Export the report to a new CSV file on the Desktop
-try {
-    $report | Export-Csv -Path $outputFilePath -NoTypeInformation -Force
-    Write-Host "Report generated and saved to: $outputFilePath" -ForegroundColor Green
-} catch {
-    Write-Host "Error exporting CSV file: $_" -ForegroundColor Red
-}
-
-# Log reallocated invoices
-if ($reallocatedInvoices.Count -gt 0) {
-    Add-Content -Path $logFilePath -Value "Reallocated Invoices Removed:"
-    $reallocatedInvoices | ForEach-Object { Add-Content -Path $logFilePath -Value $_ }
-}
-
-# Log missing payment methods
-if ($missingPaymentMethods.Count -gt 0) {
-    Add-Content -Path $logFilePath -Value "`nInvoices with Missing Payment Methods:"
-    $missingPaymentMethods | ForEach-Object { Add-Content -Path $logFilePath -Value $_ }
-}
-
-# Display log file path if there are any logged issues
-if (($reallocatedInvoices.Count -gt 0) -or ($missingPaymentMethods.Count -gt 0)) {
-    Write-Host "Processing completed with some notes. Please check the log file at: $logFilePath" -ForegroundColor Yellow
+# Extract dates from folder name for report naming
+$datePattern = "\((\d{2}\.\d{2}\.\d{2})\)_\((\d{2}\.\d{2}\.\d{2})\)"
+if ($latestWeekFolder.Name -match $datePattern) {
+    $startDate = $matches[1]
+    $endDate = $matches[2]
 } else {
-    Write-Host "Processing completed successfully with no issues." -ForegroundColor Green
+    throw "Invalid folder name format"
 }
+
+#========= #File Paths #=========
+$rawDataPath = Join-Path $latestWeekFolder.FullName "1.Gathering\RAW_($startDate)_($endDate)csv.csv"
+$customerListPath = Join-Path $basePath "Customer List.csv"
+$combinedInvoicePath = Join-Path $basePath "Weekly Payments Reconcile (daily)\Weekly Payables\Combined_Invoice_Report.csv"
+$importPath = Join-Path $latestWeekFolder.FullName "2.Import TransactionPro"
+
+# Create Import TransactionPro folder if it doesn't exist
+if (-not (Test-Path $importPath)) {
+    New-Item -ItemType Directory -Path $importPath
+}
+
+$ilsReportPath = Join-Path $importPath "ILS_Payment_Report_($startDate)_($endDate).csv"
+$shipReportPath = Join-Path $importPath "SHIP_Payment_Report_($startDate)_($endDate).csv"
+$logPath = Join-Path $importPath "ProcessingLog.txt"
+
+#========= #Initialize Log File #=========
+Clear-Content $logPath
+Add-Content $logPath "Processing Log: $(Get-Date)"
+Add-Content $logPath "Processing folder: $($latestWeekFolder.Name)"
+
+#========= #Load CSV Files #=========
+try {
+    $rawData = Import-Csv $rawDataPath
+    $customerList = Import-Csv $customerListPath
+    $combinedInvoice = Import-Csv $combinedInvoicePath
+    Add-Content $logPath "Successfully loaded all CSV files"
+} catch {
+    Add-Content $logPath "Error loading CSV files: $_"
+    throw "Failed to load required CSV files"
+}
+
+#========= #Initialize Error Tracking Lists #=========
+$missingCustomerNames = @()
+$reallocatedInvoices = @()
+$prepaidInvoices = @()
+$unmatchedInvoices = @()
+
+#========= #Helper Functions #=========
+function Get-CustomerName {
+    param ($customerId)
+    $customer = $customerList | Where-Object { $_.'Customer Id' -eq $customerId }
+    if ($customer) {
+        return $customer.Customer
+    } else {
+        Add-Content $logPath "Customer ID not found: $customerId"
+        return "N/A"
+    }
+}
+
+function Generate-RefNo {
+    param ($paymentMethod, $invoiceId)
+    if ($invoiceId.Length -lt 4) {
+        Add-Content $logPath "Warning: Invalid invoice ID length for $invoiceId"
+        return "INVALID-$invoiceId"
+    }
+    
+    switch ($paymentMethod) {
+        {$_ -match '^\d+$'} { return "5-" + $invoiceId.Substring(4) }
+        {$_ -match 'VISA|MasterCard'} { return "4-" + $invoiceId.Substring(4) }
+        {$_ -match 'AMEX'} { return "3-" + $invoiceId.Substring(4) }
+        {$_ -match 'ACH'} { return "6-" + $invoiceId.Substring(4) }
+        default { return "UNKNOWN-" + $invoiceId.Substring(4) }
+    }
+}
+
+function Convert-ToDecimal {
+    param(
+        [string]$value,
+        [string]$invoiceId,
+        [string]$fieldName
+    )
+    
+    $cleanedValue = $value -replace '[$,\s]', ''
+    try {
+        $decimal = [decimal]::Parse($cleanedValue)
+        # If it's a percentage and greater than 1, convert to decimal
+        if ($fieldName -eq "percentage" -and $decimal -gt 1) {
+            $decimal = $decimal / 100
+        }
+        return $decimal
+    } catch {
+        Add-Content $logPath "Error converting $fieldName to decimal for Invoice ID: $invoiceId. Value: '$cleanedValue'"
+        return $null
+    }
+}
+
+#========= #Processing Transactions #=========
+$ilsPayments = @()
+$shipPayments = @()
+$totalProcessed = 0
+$totalErrors = 0
+
+foreach ($row in $rawData) {
+    $customerId = $row.'Customer Id'
+    $customerName = Get-CustomerName -customerId $customerId
+    $invoiceId = $row.'Invoice Id(s)'
+    $notes = $row.Notes
+    $checkNo = $row.'Check #'
+    $paymentDate = $row.'Payment Date'
+
+    # Convert and validate amount
+    $amount = Convert-ToDecimal -value $row.Amount -invoiceId $invoiceId -fieldName "amount"
+    if ($null -eq $amount) {
+        $totalErrors++
+        continue
+    }
+
+    # Log and track various conditions
+    if ($customerName -eq "N/A") {
+        $missingCustomerNames += $invoiceId
+    }
+
+    if ($notes -match "reallocated|prepaid" -or $checkNo -match "CC|VISA|MasterCard|AMEX") {
+        if ($notes -match "reallocated") { $reallocatedInvoices += $invoiceId }
+        if ($notes -match "prepaid") { $prepaidInvoices += $invoiceId }
+        Add-Content $logPath ("Skipped payment for Invoice ID: " + $invoiceId + " (Reason: " + $notes + " or CC payment)")
+        continue
+    }
+
+    # Get all matching rows from Combined Invoice Report
+    $matchingRows = $combinedInvoice | Where-Object { $_.'Invoice Number' -eq $invoiceId }
+    if (-not $matchingRows) {
+        $unmatchedInvoices += $invoiceId
+        Add-Content $logPath ("Unmatched invoice: " + $invoiceId)
+        continue
+    }
+
+    # Process each matching row separately
+    foreach ($combinedRow in $matchingRows) {
+        # Determine if this is ILS/DHL or SHIP/FEDEX
+        $isILS = $combinedRow.'Column B' -match "DHL|ILS"
+        $isSHIP = $combinedRow.'Column B' -match "SHIP|FEDEX"
+
+        if (-not ($isILS -or $isSHIP)) {
+            Add-Content $logPath ("Skipping row for Invoice ID: " + $invoiceId + " - Unknown service type: " + $combinedRow.'Column B')
+            continue
+        }
+
+        # Get percentage for this specific service type
+        $percentage = Convert-ToDecimal -value $combinedRow.'Percentage of Total (%)' -invoiceId $invoiceId -fieldName "percentage"
+        if ($null -eq $percentage) {
+            $totalErrors++
+            continue
+        }
+
+        $adjustedAmount = [Math]::Round($amount * $percentage, 2)
+        
+        # Log the processing details
+        $logMessage = "Processed Invoice ID: " + $invoiceId + 
+                     " | Service Type: " + $combinedRow.'Column B' + 
+                     " | Original Amount: " + $amount + 
+                     " | Percentage: " + $percentage + 
+                     " | Adjusted: " + $adjustedAmount
+        Add-Content $logPath $logMessage
+
+        # Create payment record
+        $payment = [PSCustomObject]@{
+            CUSTOMER = $customerName
+            'REF NO' = Generate-RefNo -paymentMethod $checkNo -invoiceId $invoiceId
+            DATE = $paymentDate
+            'PAYMENT METHOD' = $checkNo
+            'APPLY_TO_INVOICE' = if ($invoiceId.Length -gt 4) { $invoiceId.Substring(4) } else { $invoiceId }
+            AMOUNT = $adjustedAmount
+            'DEPOSIT TO' = if ($isILS) { '15000' } else { '12000' }
+            MEMO = if ($notes) { $notes } else { $invoiceId }
+        }
+
+        # Add to appropriate payment list
+        if ($isILS) {
+            $ilsPayments += $payment
+        } elseif ($isSHIP) {
+            $shipPayments += $payment
+        }
+
+        $totalProcessed++
+    }
+}
+
+#========= #Generate Reports #=========
+try {
+    # Export payment files
+    $ilsPayments | Export-Csv $ilsReportPath -NoTypeInformation
+    $shipPayments | Export-Csv $shipReportPath -NoTypeInformation
+    
+    # Create detailed processing log
+    Add-Content $logPath "`n==========================================="
+    Add-Content $logPath "           PROCESSING SUMMARY              "
+    Add-Content $logPath "===========================================`n"
+    
+    # Summary counts
+    Add-Content $logPath "PROCESSING COUNTS:"
+    Add-Content $logPath "------------------"
+    Add-Content $logPath ("Total Transactions Processed: " + $totalProcessed)
+    Add-Content $logPath ("Total ILS Payments: " + $ilsPayments.Count)
+    Add-Content $logPath ("Total SHIP Payments: " + $shipPayments.Count)
+    Add-Content $logPath ("Total Errors Encountered: " + $totalErrors)
+    Add-Content $logPath "`n"
+
+    # Not in Combined File
+    Add-Content $logPath "NOT IN COMBINED FILE:"
+    Add-Content $logPath "--------------------"
+    if ($unmatchedInvoices.Count -gt 0) {
+        foreach ($invoice in $unmatchedInvoices | Sort-Object) {
+            Add-Content $logPath "Invoice ID: $invoice"
+        }
+    } else {
+        Add-Content $logPath "No unmatched invoices found."
+    }
+    Add-Content $logPath "`n"
+
+    # Missing Customer Names
+    Add-Content $logPath "MISSING IN CUSTOMER NAME FILE:"
+    Add-Content $logPath "----------------------------"
+    if ($missingCustomerNames.Count -gt 0) {
+        foreach ($invoice in $missingCustomerNames | Sort-Object) {
+            Add-Content $logPath "Invoice ID: $invoice"
+        }
+    } else {
+        Add-Content $logPath "No missing customer names found."
+    }
+    Add-Content $logPath "`n"
+
+    # Re-allocated Invoices
+    Add-Content $logPath "RE-ALLOCATED INVOICES:"
+    Add-Content $logPath "--------------------"
+    if ($reallocatedInvoices.Count -gt 0) {
+        foreach ($invoice in $reallocatedInvoices | Sort-Object) {
+            # Get customer ID for this invoice from raw data
+            $customerInfo = $rawData | Where-Object { $_.'Invoice Id(s)' -eq $invoice } | Select-Object -First 1
+            if ($customerInfo) {
+                Add-Content $logPath "Customer ID: $($customerInfo.'Customer Id') - Invoice ID: $invoice"
+            } else {
+                Add-Content $logPath "Invoice ID: $invoice (Customer ID not found)"
+            }
+        }
+    } else {
+        Add-Content $logPath "No re-allocated invoices found."
+    }
+    Add-Content $logPath "`n"
+
+    # Prepaid Invoices (if needed)
+    Add-Content $logPath "PREPAID INVOICES:"
+    Add-Content $logPath "----------------"
+    if ($prepaidInvoices.Count -gt 0) {
+        foreach ($invoice in $prepaidInvoices | Sort-Object) {
+            Add-Content $logPath "Invoice ID: $invoice"
+        }
+    } else {
+        Add-Content $logPath "No prepaid invoices found."
+    }
+    Add-Content $logPath "`n"
+
+    # Add processing completion timestamp
+    Add-Content $logPath "==========================================="
+    Add-Content $logPath "Processing completed at: $(Get-Date)"
+    Add-Content $logPath "==========================================="
+
+} catch {
+    Add-Content $logPath "`nERROR GENERATING REPORTS:"
+    Add-Content $logPath $_.Exception.Message
+    Add-Content $logPath $_.Exception.StackTrace
+    throw "Failed to generate reports: $_"
+}
+
+Write-Host "Processing complete. Check the log file at $logPath for detailed summary."
