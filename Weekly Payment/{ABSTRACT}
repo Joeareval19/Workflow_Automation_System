@@ -1,0 +1,9 @@
+Summary: 
+
+The purpose of this code is to generate three different processes crucial to the management and documentation of invoices. 
+
+(Drive Document) this code grabs the payments from a particular date range and re-organizes them as needed in QB. This saves around 3 hours of tedious manual work because it references a list of invoices and their category, instead of manually searching for each invoice we deduce their status from this file. 
+
+(Import report) this report is essential for uploading onto QB, we would upload all invoices into QB for both companies, and now we are uploading one report for one company and another for the other. this strategy also allows us to not have to upload any updates or changes to CC fees. we use the payment upload based off of % of the total invoice. By uploading based on the % of the company we can add the additional payment to both companies evenly. 
+
+(Combined report) this code is what grabs the raw data of open invoices from RS and consolidates them and categorizes them by company, $ amount, and $ %.
