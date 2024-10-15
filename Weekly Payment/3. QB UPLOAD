@@ -1,9 +1,9 @@
 #========= #Dynamic Path Configuration #=========
-# Base path configuration
+# Base path configuration 
 $basePath = "C:\Users\User\Desktop\JEAV"
 $rsVsQbPath = Join-Path $basePath "Weekly Payments Reconcile (daily)\RS vs QB"
 
-# Get the latest week folder
+# Get the latest week folder 
 $latestWeekFolder = Get-ChildItem -Path $rsVsQbPath -Directory |
     Where-Object { $_.Name -match "Week_\d+_\(\d{2}\.\d{2}\.\d{2}\)_\(\d{2}\.\d{2}\.\d{2}\)" } |
     Sort-Object CreationTime -Descending |
@@ -55,7 +55,6 @@ try {
 
 #========= #Initialize Error Tracking Lists #=========
 $missingCustomerNames = @()
-$reallocatedInvoices = @()
 $prepaidInvoices = @()
 $unmatchedInvoices = @()
 
@@ -77,7 +76,7 @@ function Generate-RefNo {
         Add-Content $logPath "Warning: Invalid invoice ID length for $invoiceId"
         return "INVALID-$invoiceId"
     }
-    
+
     switch ($paymentMethod) {
         {$_ -match '^\d+$'} { return "5-" + $invoiceId.Substring(4) }
         {$_ -match 'VISA|MasterCard'} { return "4-" + $invoiceId.Substring(4) }
@@ -120,7 +119,14 @@ foreach ($row in $rawData) {
     $invoiceId = $row.'Invoice Id(s)'
     $notes = $row.Notes
     $checkNo = $row.'Check #'
+    $bankName = $row.'Bank Name'   # Assuming you have a column called "Bank Name"
     $paymentDate = $row.'Payment Date'
+
+    # Filter out rows where both 'Check #' and 'Bank Name' are empty
+    if ([string]::IsNullOrWhiteSpace($checkNo) -and [string]::IsNullOrWhiteSpace($bankName)) {
+        Add-Content $logPath ("Skipped row with Invoice ID: $invoiceId because both Check # and Bank Name are empty")
+        continue
+    }
 
     # Convert and validate amount
     $amount = Convert-ToDecimal -value $row.Amount -invoiceId $invoiceId -fieldName "amount"
@@ -134,10 +140,10 @@ foreach ($row in $rawData) {
         $missingCustomerNames += $invoiceId
     }
 
-    if ($notes -match "reallocated|prepaid" -or $checkNo -match "CC|VISA|MasterCard|AMEX") {
-        if ($notes -match "reallocated") { $reallocatedInvoices += $invoiceId }
-        if ($notes -match "prepaid") { $prepaidInvoices += $invoiceId }
-        Add-Content $logPath ("Skipped payment for Invoice ID: " + $invoiceId + " (Reason: " + $notes + " or CC payment)")
+    # Updated filtering logic
+    if ($notes -match "prepaid|prepay" -or $checkNo -match "CC") {
+        if ($notes -match "prepaid|prepay") { $prepaidInvoices += $invoiceId }
+        Add-Content $logPath ("Skipped payment for Invoice ID: " + $invoiceId + " (Reason: Prepaid or CC payment)")
         continue
     }
 
@@ -151,10 +157,11 @@ foreach ($row in $rawData) {
 
     # Process each matching row separately
     foreach ($combinedRow in $matchingRows) {
-        # Determine if this is ILS/DHL or SHIP/FEDEX
+        # Treat "FEDEX" and "SHIP" as equivalent, and "DHL" and "ILS" as equivalent
         $isILS = $combinedRow.'Column B' -match "DHL|ILS"
-        $isSHIP = $combinedRow.'Column B' -match "SHIP|FEDEX"
+        $isSHIP = $combinedRow.'Column B' -match "FEDEX|SHIP"
 
+        # Ensure the script recognizes both ILS/DHL and SHIP/FEDEX
         if (-not ($isILS -or $isSHIP)) {
             Add-Content $logPath ("Skipping row for Invoice ID: " + $invoiceId + " - Unknown service type: " + $combinedRow.'Column B')
             continue
@@ -168,13 +175,13 @@ foreach ($row in $rawData) {
         }
 
         $adjustedAmount = [Math]::Round($amount * $percentage, 2)
-        
+
         # Log the processing details
-        $logMessage = "Processed Invoice ID: " + $invoiceId + 
-                     " | Service Type: " + $combinedRow.'Column B' + 
-                     " | Original Amount: " + $amount + 
-                     " | Percentage: " + $percentage + 
-                     " | Adjusted: " + $adjustedAmount
+        $logMessage = "Processed Invoice ID: " + $invoiceId +
+                      " | Service Type: " + $combinedRow.'Column B' +
+                      " | Original Amount: " + $amount +
+                      " | Percentage: " + $percentage +
+                      " | Adjusted: " + $adjustedAmount
         Add-Content $logPath $logMessage
 
         # Create payment record
@@ -185,7 +192,7 @@ foreach ($row in $rawData) {
             'PAYMENT METHOD' = $checkNo
             'APPLY_TO_INVOICE' = if ($invoiceId.Length -gt 4) { $invoiceId.Substring(4) } else { $invoiceId }
             AMOUNT = $adjustedAmount
-            'DEPOSIT TO' = if ($isILS) { '15000' } else { '12000' }
+            'DEPOSIT TO' = if ($isILS) { '15000' } else { '12000' }  # Use ILS/DHL = '15000', SHIP/FEDEX = '12000'
             MEMO = if ($notes) { $notes } else { $invoiceId }
         }
 
@@ -205,12 +212,54 @@ try {
     # Export payment files
     $ilsPayments | Export-Csv $ilsReportPath -NoTypeInformation
     $shipPayments | Export-Csv $shipReportPath -NoTypeInformation
-    
-    # Create detailed processing log
+
+    # Category: Raw File
     Add-Content $logPath "`n==========================================="
+    Add-Content $logPath "               RAW FILE SUMMARY              "
+    Add-Content $logPath "===========================================`n"
+
+    # 1. Raw file count
+    $rawFileCount = $rawData.Count
+    Add-Content $logPath "1. Raw file count: $rawFileCount"
+    
+    # 2. Prepaid Invoices
+    $prepaidRawInvoices = $rawData | Where-Object { $_.Notes -match "prepay|Prepaid" }
+    Add-Content $logPath "2. Prepaid Invoices:"
+    if ($prepaidRawInvoices.Count -gt 0) {
+        foreach ($invoice in $prepaidRawInvoices) {
+            Add-Content $logPath "Invoice ID: $($invoice.'Invoice Id(s)')"
+        }
+    } else {
+        Add-Content $logPath "No prepaid invoices found in raw file."
+    }
+    Add-Content $logPath "`n"
+
+    # 3. CC Payments
+    $ccPayments = $rawData | Where-Object { $_.'Check #' -match "CC" }
+    Add-Content $logPath "3. CC Payments:"
+    if ($ccPayments.Count -gt 0) {
+        foreach ($invoice in $ccPayments) {
+            Add-Content $logPath "Invoice ID: $($invoice.'Invoice Id(s)')"
+        }
+    } else {
+        Add-Content $logPath "No CC payments found in raw file."
+    }
+    Add-Content $logPath "`n"
+
+    # 4. Total Removed (Prepaid + CC Payments)
+    $totalRemoved = $prepaidRawInvoices.Count + $ccPayments.Count
+    Add-Content $logPath "4. Total Removed: $totalRemoved"
+    
+    # 5. Total Invoices Processed (Raw File Count - Total Removed)
+    $totalInvoicesProcessed = $rawFileCount - $totalRemoved
+    Add-Content $logPath "5. Total Invoices Processed: $totalInvoicesProcessed"
+    Add-Content $logPath "`n"
+
+    # Category: Processing Counts
+    Add-Content $logPath "==========================================="
     Add-Content $logPath "           PROCESSING SUMMARY              "
     Add-Content $logPath "===========================================`n"
-    
+
     # Summary counts
     Add-Content $logPath "PROCESSING COUNTS:"
     Add-Content $logPath "------------------"
@@ -244,46 +293,71 @@ try {
     }
     Add-Content $logPath "`n"
 
-    # Re-allocated Invoices
-    Add-Content $logPath "RE-ALLOCATED INVOICES:"
-    Add-Content $logPath "--------------------"
-    if ($reallocatedInvoices.Count -gt 0) {
-        foreach ($invoice in $reallocatedInvoices | Sort-Object) {
-            # Get customer ID for this invoice from raw data
-            $customerInfo = $rawData | Where-Object { $_.'Invoice Id(s)' -eq $invoice } | Select-Object -First 1
-            if ($customerInfo) {
-                Add-Content $logPath "Customer ID: $($customerInfo.'Customer Id') - Invoice ID: $invoice"
-            } else {
-                Add-Content $logPath "Invoice ID: $invoice (Customer ID not found)"
+    # New Section: IN RAW NOT IN REPORT
+    $processedInvoices = $ilsPayments + $shipPayments
+    $rawNotInReport = $rawData | Where-Object {
+        $rawInvoice = $_.'Invoice Id(s)'
+        $matchFound = $false
+        foreach ($processedInvoice in $processedInvoices.'APPLY_TO_INVOICE') {
+            if ($rawInvoice.EndsWith($processedInvoice)) {
+                $matchFound = $true
+                break
             }
         }
-    } else {
-        Add-Content $logPath "No re-allocated invoices found."
+        -not $matchFound
     }
-    Add-Content $logPath "`n"
 
-    # Prepaid Invoices (if needed)
-    Add-Content $logPath "PREPAID INVOICES:"
-    Add-Content $logPath "----------------"
-    if ($prepaidInvoices.Count -gt 0) {
-        foreach ($invoice in $prepaidInvoices | Sort-Object) {
-            Add-Content $logPath "Invoice ID: $invoice"
+    $missingInvoicesCount = $rawNotInReport.Count
+    Add-Content $logPath "IN RAW NOT IN REPORT: ($missingInvoicesCount missing)"
+    Add-Content $logPath "--------------------"
+    if ($missingInvoicesCount -gt 0) {
+        foreach ($invoice in $rawNotInReport | Sort-Object) {
+            Add-Content $logPath "Invoice ID: $($invoice.'Invoice Id(s)')"
         }
     } else {
-        Add-Content $logPath "No prepaid invoices found."
+        Add-Content $logPath "No invoices in raw file were excluded from the report."
     }
     Add-Content $logPath "`n"
 
     # Add processing completion timestamp
     Add-Content $logPath "==========================================="
-    Add-Content $logPath "Processing completed at: $(Get-Date)"
+    Add-Content $logPath " Processing completed on: $(Get-Date)"
     Add-Content $logPath "==========================================="
-
+    
+    # Display log path for user
+    Write-Host "Processing complete. Log file generated at: $logPath"
+    
 } catch {
-    Add-Content $logPath "`nERROR GENERATING REPORTS:"
-    Add-Content $logPath $_.Exception.Message
-    Add-Content $logPath $_.Exception.StackTrace
-    throw "Failed to generate reports: $_"
+    Add-Content $logPath "Error generating reports: $_"
+    throw "Failed to generate ILS/SHIP reports"
 }
 
-Write-Host "Processing complete. Check the log file at $logPath for detailed summary."
+#========= #Final Summary Output #=========
+Write-Host "Total Transactions Processed: $totalProcessed"
+Write-Host "Total ILS Payments: $($ilsPayments.Count)"
+Write-Host "Total SHIP Payments: $($shipPayments.Count)"
+Write-Host "Total Errors Encountered: $totalErrors"
+
+if ($unmatchedInvoices.Count -gt 0) {
+    Write-Host "Unmatched Invoices found: $($unmatchedInvoices.Count)"
+    Write-Host "Check log for details: $logPath"
+} else {
+    Write-Host "All invoices matched successfully."
+}
+
+if ($missingCustomerNames.Count -gt 0) {
+    Write-Host "Missing customer names for some invoices: $($missingCustomerNames.Count)"
+    Write-Host "Check log for details: $logPath"
+} else {
+    Write-Host "No missing customer names found."
+}
+
+if ($missingInvoicesCount -gt 0) {
+    Write-Host "Invoices in raw file but not in report: $missingInvoicesCount"
+    Write-Host "Check log for details: $logPath"
+} else {
+    Write-Host "No invoices in raw file were excluded from the report."
+}
+
+# Done
+Write-Host "Script execution completed."
