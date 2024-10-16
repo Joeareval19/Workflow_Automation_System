@@ -1,0 +1,12 @@
+Code Summary: 
+
+
+
+architextrure design ECO: 
+
+Column(A):------------ row # [row 2 is actually row 1]
+Column(B):------------ "TRG10028"
+Column(C):------------ "Todays Date"
+Column(D):------------ Column(d) "YT Reference" from TRG_RAW file IF: Column(p) "Product Name" = "CIRRO ECONOMY WEST"
+Column(E):------------ Column(e) "Order Number" from TRG_RAW file IF: Column(p) "Product Name" = "CIRRO ECONOMY WEST"
+
