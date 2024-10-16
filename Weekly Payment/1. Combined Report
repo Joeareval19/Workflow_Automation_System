@@ -1,0 +1,122 @@
+# Define the path to the input CSV file and output CSV file
+$inputFilePath = "C:\Users\User\Desktop\JEAV\Weekly Payments Reconcile (daily)\Weekly Payables\Raw File.csv"
+$outputFilePath = "C:\Users\User\Desktop\JEAV\Weekly Payments Reconcile (daily)\Weekly Payables\Combined_Invoice_Report.csv"
+
+# Import the raw data CSV file
+$rawData = Import-Csv -Path $inputFilePath
+
+# Define carrier groups using hash tables for faster lookup
+$carrierGroups = @{
+    DHL   = 'DHL'
+    OTHER = @('FEDEX', 'UPS', 'FREIGHT')
+}
+
+# Group the raw data by 'Invoice Number' upfront to optimize access
+$groupedData = $rawData | Group-Object -Property 'Invoice Number'
+
+# Initialize a generic list to hold the report data for better performance
+$invoiceReport = New-Object System.Collections.Generic.List[PSObject]
+
+# Iterate over each group (each unique Invoice Number)
+foreach ($group in $groupedData) {
+    $invoiceNumber = $group.Name
+    $invoiceItems = $group.Group
+
+    # Initialize variables to track carrier presence
+    $hasDHL = $false
+    $hasOther = $false
+
+    # Initialize totals
+    $totalAll = 0          # Sum of all Customer Totals
+    $totalDHL = 0          # Sum of Customer Totals where Carrier is DHL
+    $totalOther = 0        # Sum of Customer Totals where Carrier is FEDEX, UPS, FREIGHT
+
+    # Iterate through each item in the current invoice group
+    foreach ($item in $invoiceItems) {
+        # Normalize carrier name once
+        $carrier = if ($null -ne $item.'Carrier') { $item.'Carrier'.Trim().ToUpper() } else { '' }
+
+        # Check carrier groups
+        if ($carrier -eq $carrierGroups.DHL) {
+            $hasDHL = $true
+            # Accumulate DHL-specific total
+            $amount = 0
+            if ([double]::TryParse($item.'Customer Total', [ref]$amount)) {
+                $totalDHL += $amount
+            }
+        }
+        elseif ($carrierGroups.OTHER -contains $carrier) {
+            $hasOther = $true
+            # Accumulate Other carriers-specific total
+            $amount = 0
+            if ([double]::TryParse($item.'Customer Total', [ref]$amount)) {
+                $totalOther += $amount
+            }
+        }
+
+        # Accumulate total for all
+        $amountAll = 0
+        if ([double]::TryParse($item.'Customer Total', [ref]$amountAll)) {
+            $totalAll += $amountAll
+        }
+    }
+
+    # Determine label(s) and add appropriate rows based on carrier presence
+    if ($hasDHL -and -not $hasOther) {
+        # Only DHL present
+        $percentage = if ($totalAll -ne 0) { [math]::Round(($totalAll / $totalAll), 10) } else { 0 }
+        $invoiceReport.Add([PSCustomObject]@{
+            'Invoice Number'          = $invoiceNumber
+            'Column B'                = 'ILS'
+            'Customer Total'          = [math]::Round($totalAll, 2)      # Sum all
+            'Percentage of Total (%)' = "{0:N10}" -f $percentage         # 1.0000000000
+        })
+    }
+    elseif (-not $hasDHL -and $hasOther) {
+        # Only FEDEX, UPS, or FREIGHT present
+        $percentage = if ($totalAll -ne 0) { [math]::Round(($totalAll / $totalAll), 10) } else { 0 }
+        $invoiceReport.Add([PSCustomObject]@{
+            'Invoice Number'          = $invoiceNumber
+            'Column B'                = 'SHIP'
+            'Customer Total'          = [math]::Round($totalAll, 2)      # Sum all
+            'Percentage of Total (%)' = "{0:N10}" -f $percentage         # 1.0000000000
+        })
+    }
+    elseif ($hasDHL -and $hasOther) {
+        # Both DHL and other carriers present - create two rows
+
+        # Row for DHL
+        $percentageDHL = if ($totalAll -ne 0) { [math]::Round(($totalDHL / $totalAll), 10) } else { 0 }
+        $invoiceReport.Add([PSCustomObject]@{
+            'Invoice Number'          = $invoiceNumber
+            'Column B'                = 'DHL'
+            'Customer Total'          = [math]::Round($totalDHL, 2)      # Sum only DHL
+            'Percentage of Total (%)' = "{0:N10}" -f $percentageDHL      # 0.5555555556
+        })
+
+        # Row for Other carriers (FEDEX, UPS, FREIGHT)
+        $percentageOther = if ($totalAll -ne 0) { [math]::Round(($totalOther / $totalAll), 10) } else { 0 }
+        $invoiceReport.Add([PSCustomObject]@{
+            'Invoice Number'          = $invoiceNumber
+            'Column B'                = 'FEDEX'
+            'Customer Total'          = [math]::Round($totalOther, 2)    # Sum only Other carriers
+            'Percentage of Total (%)' = "{0:N10}" -f $percentageOther    # 0.4444444444
+        })
+    }
+    else {
+        # No matching carriers found - create blank row with total sum
+        $percentage = if ($totalAll -ne 0) { [math]::Round(($totalAll / $totalAll), 10) } else { 0 }
+        $invoiceReport.Add([PSCustomObject]@{
+            'Invoice Number'          = $invoiceNumber
+            'Column B'                = ''
+            'Customer Total'          = [math]::Round($totalAll, 2)      # Sum all
+            'Percentage of Total (%)' = "{0:N10}" -f $percentage         # 1.0000000000
+        })
+    }
+}
+
+# Export the report to a CSV file with UTF8 encoding to handle special characters
+$invoiceReport | Export-Csv -Path $outputFilePath -NoTypeInformation -Encoding UTF8
+
+# Output completion message
+Write-Host "Combined report generated at: $outputFilePath"
