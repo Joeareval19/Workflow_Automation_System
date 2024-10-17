@@ -3,10 +3,90 @@ Code Summary:
 
 
 architextrure design ECO: 
+these are the collumns that need to come up on the new report: Count	"Invoice
+Number"	"Invoice
+Date"	"YT
+Reference"	"Order
+Number"	"Last Mile
+Tracking Number"	"Shipper
+Name"	"Ref.
+1"	"Ref.
+2"	"Customer
+ID"	"Arrival
+Time"	City	State	Zipcode	Country	Zone	Zone	Zone	"Product
+Name"	L	W	H	"Dims
+Weight"	"Actual
+Weight"	"Unit of
+Weight"	Chargeable Weight	Weight	Round	OZ/LB	Suggested Sell	"ACTUAL
+Sell"	Dif.	"COST
+PARCELL"	Recalculated Cost	Dif.	"Fuel
+Fee"	"Reship
+Fee"	"RA
+Surcharge"	"Return
+Fee"	"Additional Charge for
+Special Products"	"Actual Surcharge
+Cost / Other Charges"	"Recalculated
+Surcharge / Other"	DIF.	"Total
+Invoice"	"Total
+Cost"	Margin	CREDIT
 
-Column(A):------------ row # [row 2 is actually row 1]
-Column(B):------------ "TRG10028"
-Column(C):------------ "Todays Date"
-Column(D):------------ Column(d) "YT Reference" from TRG_RAW file IF: Column(p) "Product Name" = "CIRRO ECONOMY WEST"
-Column(E):------------ Column(e) "Order Number" from TRG_RAW file IF: Column(p) "Product Name" = "CIRRO ECONOMY WEST"
 
+Column(A):------------- row # [row 2 is actually row 1]
+Column(B):------------- "TRG10028"
+Column(C):------------- "Todays Date"
+Column(D):------------- Column(d) "YT Reference" from TRG_RAW file IF: Column(p) "Product Name" = "CIRRO ECONOMY WEST"
+Column(E):------------- Column(e) "Order Number" from TRG_RAW file IF: Column(p) "Product Name" = "CIRRO ECONOMY WEST"
+Column(F):------------- Column(f) "Last Mile Tracking Number" from TRG_RAW file IF: Column(p) "Product Name" = "CIRRO ECONOMY WEST"
+Column(G): Blank
+Column(H):------------- Column(g) "Reference 1" from TRG_RAW file IF: Column(p) "Product Name" = "CIRRO ECONOMY WEST" 
+Column(I):------------- Column(h) "Reference 2" from TRG_RAW file IF: Column(p) "Product Name" = "CIRRO ECONOMY WEST" 
+Column(J):------------- Column(i) "Customer ID" from TRG_RAW file IF: Column(p) "Product Name" = "CIRRO ECONOMY WEST" 
+Column(K):------------- Column(j) "Arrival Time" from TRG_RAW file IF: Column(p) "Product Name" = "CIRRO ECONOMY WEST" 
+Column(L):------------- Column(k) "Destination City" from TRG_RAW file IF: Column(p) "Product Name" = "CIRRO ECONOMY WEST" 
+Column(M):------------- Column(l) "Destination State" from TRG_RAW file IF: Column(p) "Product Name" = "CIRRO ECONOMY WEST" 
+Column(N):------------- Column(m) "Destination Zipcode" from TRG_RAW file IF: Column(p) "Product Name" = "CIRRO ECONOMY WEST" 
+Column(O):------------- Column(n) "Destination Country" from TRG_RAW file IF: Column(p) "Product Name" = "CIRRO ECONOMY WEST" 
+Column(P):------------- Column(o) "Zone" from TRG_RAW file IF: Column(p) "Product Name" = "CIRRO ECONOMY WEST" 
+Column(Q):------------- IF(AND(P2>0,P2<9),P2,"Remote") from the new file columns
+Column(R):------------- VALUE(RIGHT(P2,1)) from the new file columns
+Column(S):------------- Show "CIRRO ECONOMY WEST"
+Column(T):------------- Column(t) "Length" from TRG_RAW file IF: Column(p) "Product Name" = "CIRRO ECONOMY WEST" 
+Column(U):------------- Column(u) "Width" from TRG_RAW file IF: Column(p) "Product Name" = "CIRRO ECONOMY WEST" 
+Column(V):------------- Column(v) "Hight" from TRG_RAW file IF: Column(p) "Product Name" = "CIRRO ECONOMY WEST" 
+Column(W):------------- (ROUNDUP(((T2*U2*V2)/166),2))) from the new file generated
+Column(X):------------- Column(s) "Actual Weight" from TRG_RAW file IF: Column(p) "Product Name" = "CIRRO ECONOMY WEST" 
+Column(Y):------------- Column(q) "unit of weight" from TRG_RAW file IF: Column(p) "Product Name" = "CIRRO ECONOMY WEST" 
+Column(Z):------------- IF(W2*166<1728,X2, IF(X2<1,X2,(ROUNDUP(MAX(W2,X2),2))))) from new reprot generated
+Column(AA):------------ IF(Z2>0.999,Z2,Z2*16)) from new report
+Column(AB):------------ ROUNDUP(AA2,0)) from new report
+Column(AC):------------ IF(X2>0.999,"LB","OZ")) from new report
+Column(AD):------------ Column(z) "Postage" from TRG_RAW file IF: Column(p) "Product Name" = "CIRRO ECONOMY WEST" 
+Column(AE):------------ IF(AND(AC2="LB",AB2>30),AH2/(1-('COST RATES'!$B$51)),
+  IF(AND(Q2="Remote",AC2="OZ"),(XLOOKUP(AB2,Rates!$K$3:$K$18,XLOOKUP(R2,Rates!$L$2:$T$2,Rates!$L$3:$T$18))),
+  IF(AND(Q2="Remote",AC2="LB"),XLOOKUP(AB2,Rates!$K$21:$K$40,XLOOKUP(R2,Rates!$L$2:$T$2,Rates!$L$21:$T$40)),
+  IF(AND(Q2<>"Remote",AC2="OZ"),XLOOKUP(AB2,Rates!$A$3:$A$18,XLOOKUP(R2,Rates!$B$2:$I$2,Rates!$B$3:$I$18)),
+  XLOOKUP(AB2,Rates!$A$21:$A$50,XLOOKUP(R2,Rates!$B$20:$I$20,Rates!$B$21:$I$50))))))): REMEMEBR THAT WE ARE USING 
+Column(AF):------------ AD2-AE2
+Column(AG): Blank
+Column(AH):------------ IF(AND(AC2="LB",AB2>30),AD2*(1-('COST RATES'!$B$51)),
+  IF(AND(Q2="Remote",AC2="OZ"),(XLOOKUP(AB2,'COST RATES'!$K$3:$K$18,XLOOKUP(R2,'COST RATES'!$L$2:$T$2,'COST RATES'!$L$3:$T$18))),
+  IF(AND(Q2="Remote",AC2="LB"),XLOOKUP(AB2,'COST RATES'!$K$21:$K$40,XLOOKUP(R2,'COST RATES'!$L$2:$T$2,'COST RATES'!$L$21:$T$40)),
+  IF(AND(Q2<>"Remote",AC2="OZ"),XLOOKUP(AB2,'COST RATES'!$A$3:$A$18,XLOOKUP(R2,'COST RATES'!$B$2:$I$2,'COST RATES'!$B$3:$I$18)),
+  XLOOKUP(AB2,'COST RATES'!$A$21:$A$50,XLOOKUP(R2,'COST RATES'!$B$20:$I$20,'COST RATES'!$B$21:$I$50)))))))
+Column(AI):------------ IF(AD2="","",AG2-AH2)
+Column(AJ):------------ Column(aa) "Fuel Fee" from TRG_RAW file IF: Column(p) "Product Name" = "CIRRO ECONOMY WEST" 
+Column(AK):------------ Column(ab) "Reship Fee" from TRG_RAW file IF: Column(p) "Product Name" = "CIRRO ECONOMY WEST" 
+Column(AL):------------ Column(ac) "Remote Area Surcharge" from TRG_RAW file IF: Column(p) "Product Name" = "CIRRO ECONOMY WEST" 
+Column(AM):------------ Column(ad) "Return Fee" from TRG_RAW file IF: Column(p) "Product Name" = "CIRRO ECONOMY WEST" 
+Column(AN):------------ Column(ae) "Additional Charge for Special Products" from TRG_RAW file IF: Column(p) "Product Name" = "CIRRO ECONOMY WEST" 
+Column(AO):------------ Column(af) "Other Charges" from TRG_RAW file IF: Column(p) "Product Name" = "CIRRO ECONOMY WEST" 
+Column(AP):------------ IF(AND(X2<1,((T2*U2*V2>=400))),1,
+  IF(MAX(T2:V2)>=21,8,
+  IF(AND(MAX(T2,U2,V2)>=17,MEDIAN(T2,U2,V2)>=17),8,0)))
+   + IF(AND(T2*U2*V2>=3456),15,0)
+  + IF(AO2=0.7,0.7,0))
+Column(AQ):------------ AO2-AP2 frtom new file 
+Column(AR):------------ SUM(AJ2:AO2)+AE2) from new file 
+Column(AS):------------ (SUM(AJ2:AO2)+AH2))
+Column(AT):------------ IF($B2="","",AR2-AS2)
+Column(AU): Blank
