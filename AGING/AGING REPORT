@@ -1,0 +1,52 @@
+import pandas as pd
+
+def process_aging_report(input_path, output_path):
+    try:
+        # Read the CSV file
+        df = pd.read_csv(input_path)
+        
+        #'15%' column 
+        df['15%'] = ''
+
+       #'85%' column 
+        df['85%'] = '' 
+
+        #'15%' column 
+        df['15%'] = ''
+
+        #'15%' column 
+        df['15%'] = ''
+
+        #'15%' column 
+        df['15%'] = ''
+
+        # Define new column order
+        new_columns = [
+            'Customer', 'Customer #', 'Collector', 'Sales Rep',
+            'Total Due', 'Total Overdue', '15%', '<= 0 days', '1 to 30',
+            '31 to 45', '46 to 60', '61 to 90', '91 to 120',
+            'Over 120 Age', 'Max Days Overdue', 'Pending Adjustments',
+            'Avg Days to Pay', 'Avg Days to Pay', 'Terms', 'Total Overpaid', 'Max Age'
+        ]
+        
+        # Rename 'Over 120' to 'Over 120 Age' if needed
+        if 'Over 120' in df.columns:
+            df = df.rename(columns={'Over 120': 'Over 120 Age'})
+        
+        # Reorder columns
+        df = df[new_columns]
+        
+        # Export to Excel
+        df.to_excel(output_path, index=False)
+        print(f"File successfully processed and saved to {output_path}")
+        return df
+        
+    except Exception as e:
+        print(f"Error processing file: {str(e)}")
+        return None
+
+# Usage
+file_path = r"C:\Users\User\Desktop\JEAV\Aging Reconcile (monday)\Week_46_(11.10.24)_(11.16.24) - Copy\1.Gathering\RAW Aging.csv"
+output_path = r"C:\Users\User\Desktop\Processed_Aging.xlsx"
+
+df = process_aging_report(file_path, output_path)
