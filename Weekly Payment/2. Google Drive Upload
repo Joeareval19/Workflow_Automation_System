@@ -74,22 +74,31 @@ $outputFilePath = [System.IO.Path]::Combine([System.Environment]::GetFolderPath(
 $data = Import-Csv -Path $inputFilePath
 $combinedInvoiceReport = Import-Csv -Path $combinedReportPath
 
-# Create a hashtable for quick invoice to Column B lookup
-$invoiceColumnBMap = @{}
+# Create a hashtable for invoice numbers mapping to a list of their entries (handling multiple categories)
+$invoiceInfoMap = @{}
 foreach ($invoice in $combinedInvoiceReport) {
     $invoiceNumber = $invoice.'Invoice Number'
     $columnBValue = $invoice.'Column B'
+    $percentageOfTotal = $invoice.'Percentage of Total (%)'
 
-    if ($invoiceNumber -and $columnBValue) {
-        $invoiceColumnBMap[$invoiceNumber] = $columnBValue
+    if ($invoiceNumber) {
+        if (-not $invoiceInfoMap.ContainsKey($invoiceNumber)) {
+            $invoiceInfoMap[$invoiceNumber] = @()
+        }
+        $invoiceInfoMap[$invoiceNumber] += @{
+            'ColumnB' = $columnBValue
+            'Percentage' = $percentageOfTotal
+        }
     }
 }
 
+# Initialize an array to hold output records
+$outputRecords = @()
+
 # Process and clean the data
-$cleanedData = $data | Where-Object {
+$data | Where-Object {
     # Apply multiple conditions
     $_.'Check #' -notlike '*CC*' -and                   # Remove rows where Check # contains 'CC'
-    $_.Notes -notmatch '(?i)prepaid|prepay' -and        # Remove rows with 'Prepaid' or 'Prepay' in Notes
     $_.Notes -notmatch '(?i)re-allocated'               # Remove rows with 're-allocated' in Notes
 } | ForEach-Object {
     # If Check # is empty, use Bank Name
@@ -123,44 +132,77 @@ $cleanedData = $data | Where-Object {
         $paymentMethod = 'Other'
     }
 
-    ### Lookup Column B Information ###
-    # Initialize an array to hold Column B values
-    $columnBList = @()
+    # Get the total amount from the RAW data for this payment
+    # Clean the Amount string by removing currency symbols and commas
+    $rawAmountString = $_.Amount -replace '[^\d.-]', ''
+    $rawAmount = [decimal]$rawAmountString
 
     # Split 'Invoice Id(s)' into individual IDs
     $invoiceIds = $_.'Invoice Id(s)' -split '[,;]' | ForEach-Object { $_.Trim() }
 
+    $hasInvoiceInfo = $false
+
     foreach ($invoiceId in $invoiceIds) {
-        if ($invoiceColumnBMap.ContainsKey($invoiceId)) {
-            $columnBValue = $invoiceColumnBMap[$invoiceId]
-            if (-not [string]::IsNullOrEmpty($columnBValue) -and -not $columnBList.Contains($columnBValue)) {
-                $columnBList += $columnBValue
+        if ($invoiceInfoMap.ContainsKey($invoiceId)) {
+            $hasInvoiceInfo = $true
+            foreach ($invoiceInfo in $invoiceInfoMap[$invoiceId]) {
+                $columnBValue = $invoiceInfo['ColumnB']
+                $percentageOfTotal = $invoiceInfo['Percentage']
+
+                if ($percentageOfTotal) {
+                    # Clean the percentage string
+                    $percentageString = $percentageOfTotal -replace '[^\d.-]', ''
+                    $percentageDecimal = [decimal]$percentageString
+
+                    # Calculate the amount for this invoice based on the percentage
+                    $invoiceAmount = $rawAmount * $percentageDecimal
+
+                    # Create a custom object with all required columns
+                    $outputRecord = [PSCustomObject]@{
+                        Amount          = $invoiceAmount
+                        'Column B'      = $columnBValue
+                        'Check #'       = $_.'Check #'
+                        'Payment Date'  = $_.'Payment Date'
+                        'Customer Id'   = $_.'Customer Id'
+                        'Customer'      = $_.'Customer'
+                        'Invoice Id(s)' = $invoiceId  # Use the individual invoice ID
+                        Notes           = $_.Notes
+                        'Payment Method'= $paymentMethod
+                    }
+
+                    $outputRecords += $outputRecord
+                } else {
+                    Write-Warning "Percentage for Invoice ID $invoiceId not found or invalid in combined invoice report."
+                }
             }
+        } else {
+            Write-Warning "Invoice ID $invoiceId not found in combined invoice report."
         }
     }
 
-    # Join the Column B values into a single string
-    $columnB = $columnBList -join ', '
+    if (-not $hasInvoiceInfo) {
+        # If no invoice info found, create a record with raw amount
+        $outputRecord = [PSCustomObject]@{
+            Amount          = $rawAmount
+            'Column B'      = ''
+            'Check #'       = $_.'Check #'
+            'Payment Date'  = $_.'Payment Date'
+            'Customer Id'   = $_.'Customer Id'
+            'Customer'      = $_.'Customer'
+            'Invoice Id(s)' = $_.'Invoice Id(s)'
+            Notes           = $_.Notes
+            'Payment Method'= $paymentMethod
+        }
 
-    # Create a custom object with all required columns, including Column B and Payment Method
-    [PSCustomObject]@{
-        Amount          = $_.Amount
-        'Column B'      = $columnB         # New 'Column B' column
-        'Check #'       = $_.'Check #'
-        'Payment Date'  = $_.'Payment Date'
-        'Customer Id'   = $_.'Customer Id'
-        'Customer'      = $_.'Customer'
-        'Invoice Id(s)' = $_.'Invoice Id(s)'
-        Notes           = $_.Notes
-        'Payment Method'= $paymentMethod
+        $outputRecords += $outputRecord
     }
 }
 
 # Define the desired order of Payment Methods
 $paymentMethodOrder = @('Check', 'ACH', 'Credit Card', 'Other')
 
-# Sort the cleaned data by Payment Date, Payment Method (according to the desired order), and then by Check #
-$sortedData = $cleanedData | Sort-Object -Property @{
+# Sort the output records by Payment Date, Payment Method (according to the desired order), and then by Check #
+$sortedData = $outputRecords | Sort-Object -Property @{
     Expression = { $_.'Payment Date' }
     Ascending = $true
 }, @{
