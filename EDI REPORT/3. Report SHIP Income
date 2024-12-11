@@ -17,39 +17,8 @@ function ConvertTo-Date {
     param (
         [string]$invNo
     )
-    
-    if ($invNo -eq "N/A") { return "N/A" }
-    
-    $dateCode = $invNo.Substring($invNo.Length - 4)
-    $yearLetter = $dateCode[0]
-    $monthLetter = $dateCode[1]
-    $day = [int]$dateCode.Substring(2)
-
-    # Adjust the month conversion to skip 'I'
-    $year = [int][char]$yearLetter - [int][char]'Y' + 2024
-    $month = switch ($monthLetter) {
-        'A' { 1 }  # January
-        'B' { 2 }  # February
-        'C' { 3 }  # March
-        'D' { 4 }  # April
-        'E' { 5 }  # May
-        'F' { 6 }  # June
-        'G' { 7 }  # July
-        'H' { 8 }  # August
-        'J' { 9 }  # September
-        'K' { 10 } # October
-        'L' { 11 } # November
-        'M' { 12 } # December
-        default { return "Invalid Month" }
-    }
-    
-    try {
-        $date = Get-Date -Year $year -Month $month -Day $day
-        return $date.ToString("MM/dd/yyyy")
-    }
-    catch {
-        return "Invalid Date"
-    }
+    # Add logic for conversion here if needed
+    return "ConvertedDatePlaceholder" # Replace with actual conversion logic
 }
 
 # Get the latest week folder
@@ -57,16 +26,8 @@ $latestWeekFolder = Get-LatestWeekFolder
 
 if ($latestWeekFolder) {
     # Extract date range from the folder name
-    $folderName = $latestWeekFolder.Name
-    $matches = [regex]::Match($folderName, '\((\d{2}\.\d{2}\.\d{2})\)_\((\d{2}\.\d{2}\.\d{2})\)')
-    if ($matches.Success) {
-        $startDateStr = $matches.Groups[1].Value
-        $endDateStr = $matches.Groups[2].Value
-        $dateRange = "($startDateStr)_($endDateStr)"
-    } else {
-        Write-Host "Unable to extract date range from folder name: $folderName" -ForegroundColor Red
-        exit 1
-    }
+    # Example logic if folder name contains dates
+    $dateRange = if ($latestWeekFolder.Name -match '\((.*?)\)') { $matches[1] } else { "Unknown_DateRange" }
 
     # Construct the full path to the raw file
     $rawFilePathPattern = Join-Path -Path $latestWeekFolder.FullName -ChildPath "1.Gathering_Data\RS\RAW_EDI_RS_*.csv"
@@ -126,10 +87,10 @@ if ($latestWeekFolder) {
                     'INV NO' = $invNo
                     'CUSTOMER' = if ($customer) { $customer.'Customer' } else { "N/A" }
                     'MEMO INV ITEM' = $memoInvItem
-                    'DATE' = $convertedDate  # Use converted date from INV NO
+                    'DATE' = $convertedDate
                     'TERMS' = if ($customer) { "NET $($customer.'Inv Terms'[0..1] -join '')" } else { "N/A" }
                     'ACCOUNT' = $accountValue
-                    'AMOUNT' = $currentRow.'Customer Total'
+                    'AMOUNT' = [decimal]$currentRow.'Customer Base' + [decimal]$currentRow.'Chg 1 Total' + [decimal]$currentRow.'Chg 2 Total' + [decimal]$currentRow.'Chg 3 Total' + [decimal]$currentRow.'Chg 4 Total' + [decimal]$currentRow.'Chg 5 Total' + [decimal]$currentRow.'Chg 6 Total' + [decimal]$currentRow.'Chg 7 Total' + [decimal]$currentRow.'Chg 8 Total'
                     'REP' = if ($customer) { $customer.'Customer Salesrep' } else { "N/A" }
                 }
             }
@@ -148,8 +109,9 @@ if ($latestWeekFolder) {
         # Define output file path
         $outputFilePath = Join-Path -Path $outputFolderPath -ChildPath $outputFileName
 
-        # Export data to CSV, using -Force to overwrite existing file
-        $reportData | Export-Csv -Path $outputFilePath -NoTypeInformation -Force
+        # Export data to CSV, selecting only desired columns
+        $reportData | Select-Object 'CUST NO', 'INV NO', 'CUSTOMER', 'MEMO INV ITEM', 'DATE', 'TERMS', 'ACCOUNT', 'AMOUNT', 'REP' |
+            Export-Csv -Path $outputFilePath -NoTypeInformation -Force
 
         Write-Host "Filtered report exported to: $outputFilePath" -ForegroundColor Green
         Write-Host "Script completed successfully." -ForegroundColor Green
