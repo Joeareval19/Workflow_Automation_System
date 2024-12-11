@@ -129,6 +129,9 @@ if ($latestWeekFolder) {
                 }
             }
 
+        # Sort report data by BILL NO in alphabetical order (A-Z)
+        $sortedReportData = $reportData | Sort-Object -Property 'BILL NO'
+
         # Define output folder path
         $outputFolderPath = Join-Path -Path $latestWeekFolder.FullName -ChildPath '4.QB_Report\ILS (DHL)'
 
@@ -143,14 +146,14 @@ if ($latestWeekFolder) {
         # Define output file path
         $outputFilePath = Join-Path -Path $outputFolderPath -ChildPath $outputFileName
 
-        # Export data to CSV, using -Force to overwrite existing file
-        $reportData | Export-Csv -Path $outputFilePath -NoTypeInformation -Force
+        # Export sorted data to CSV, using -Force to overwrite existing file
+        $sortedReportData | Export-Csv -Path $outputFilePath -NoTypeInformation -Force
 
-        Write-Host "DHL Billing report exported to: $outputFilePath" -ForegroundColor Green
-        Write-Host "Script completed successfully." -ForegroundColor Green
+        Write-Host "DHL Billing report exported to: $outputFilePath in sorted order by BILL NO (A-Z)" -ForegroundColor Green
+        Write-Host "Script completed successfully."
 
         # Display summary of problematic data
-        $invalidDates = $reportData | Where-Object { $_.'DATE' -eq 'Invalid Date' -or $_.'DATE' -eq 'N/A' }
+        $invalidDates = $sortedReportData | Where-Object { $_.'DATE' -eq 'Invalid Date' -or $_.'DATE' -eq 'N/A' }
         if ($invalidDates) {
             Write-Host "`nWarning: Some records have invalid or missing dates:" -ForegroundColor Yellow
             $invalidDates | ForEach-Object {
@@ -158,7 +161,7 @@ if ($latestWeekFolder) {
             }
         }
 
-        $unknownAccounts = $reportData | Where-Object { $_.'ACCOUNT' -eq 'UNKNOWN' }
+        $unknownAccounts = $sortedReportData | Where-Object { $_.'ACCOUNT' -eq 'UNKNOWN' }
         if ($unknownAccounts) {
             Write-Host "`nWarning: Some records have unknown account types:" -ForegroundColor Yellow
             $unknownAccounts | ForEach-Object {
@@ -166,7 +169,7 @@ if ($latestWeekFolder) {
             }
         }
 
-        $zeroAmounts = $reportData | Where-Object { [double]$_.'AMOUNT' -eq 0 }
+        $zeroAmounts = $sortedReportData | Where-Object { [double]$_.'AMOUNT' -eq 0 }
         if ($zeroAmounts) {
             Write-Host "`nWarning: Some records have zero amounts:" -ForegroundColor Yellow
             $zeroAmounts | ForEach-Object {
