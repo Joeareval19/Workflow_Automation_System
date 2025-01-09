@@ -1,182 +1,150 @@
-import os
-import re
-import sys
-import csv
-import glob
-from datetime import datetime
-
 # Define the constant path for the customer list file
-customer_list_path = r"C:\Users\User\Desktop\JEAV\Customer List.csv"
+$customerListPath = "C:\Users\User\Desktop\JEAV\Customer List.csv"
 
 # Define the base path for the raw file directory
-raw_file_base_path = r"C:\Users\User\Desktop\JEAV\EDI Reconcile (monday)"
+$rawFileBasePath = "C:\Users\User\Desktop\JEAV\EDI Reconcile (monday)"
 
 # Function to get the most recent week folder
-def get_latest_week_folder():
-    pattern = re.compile(r'^Week_\d+_\(\d{2}\.\d{2}\.\d{2}\)_\(\d{2}\.\d{2}\.\d{2}\)$')
-    folders = []
-    for entry in os.listdir(raw_file_base_path):
-        full_path = os.path.join(raw_file_base_path, entry)
-        if os.path.isdir(full_path) and pattern.match(entry):
-            folders.append((full_path, os.path.getmtime(full_path)))
-    if folders:
-        # Sort folders by last modified time in descending order
-        latest_folder = sorted(folders, key=lambda x: x[1], reverse=True)[0][0]
-        return latest_folder
-    else:
-        return None
+function Get-LatestWeekFolder {
+    Get-ChildItem -Path $rawFileBasePath -Directory | 
+    Where-Object { $_.Name -match '^Week_\d+_\(\d{2}\.\d{2}\.\d{2}\)_\(\d{2}\.\d{2}\.\d{2}\)$' } |
+    Sort-Object LastWriteTime -Descending | 
+    Select-Object -First 1
+}
 
 # Function to convert INV NO to date with adjusted month letters
-def convert_to_date(inv_no):
-    if inv_no == "N/A":
-        return "N/A"
-    date_code = inv_no[-4:]
-    year_letter = date_code[0]
-    month_letter = date_code[1]
-    day_str = date_code[2:]
+function ConvertTo-Date {
+    param (
+        [string]$invNo
+    )
+    
+    if ($invNo -eq "N/A") { return "N/A" }
+    
+    $dateCode = $invNo.Substring($invNo.Length - 4)
+    $yearLetter = $dateCode[0]
+    $monthLetter = $dateCode[1]
+    $day = [int]$dateCode.Substring(2)
 
     # Calculate year based on the year letter
-    year = ord(year_letter) - ord('Y') + 2024
+    $year = [int][char]$yearLetter - [int][char]'Y' + 2024
 
     # Adjust for the skipped month 'I'
-    month = ord(month_letter) - ord('A') + 1
-    if month_letter >= 'J':
-        month -= 1  # If September or later, decrease month by 1
+    $month = [int][char]$monthLetter - [int][char]'A' + 1
+    if ($monthLetter -ge 'J') { $month-- }  # If September or later, decrease month by 1
 
-    try:
-        day = int(day_str)
-        date_obj = datetime(year, month, day)
-        return date_obj.strftime("%m/%d/%Y")
-    except ValueError:
+    try {
+        $date = Get-Date -Year $year -Month $month -Day $day
+        return $date.ToString("MM/dd/yyyy")
+    }
+    catch {
         return "Invalid Date"
+    }
+}
 
 # Get the latest week folder
-latest_week_folder = get_latest_week_folder()
+$latestWeekFolder = Get-LatestWeekFolder
 
-if latest_week_folder:
+if ($latestWeekFolder) {
     # Extract date range from the folder name
-    folder_name = os.path.basename(latest_week_folder)
-    match = re.search(r'\((\d{2}\.\d{2}\.\d{2})\)_\((\d{2}\.\d{2}\.\d{2})\)', folder_name)
-    if match:
-        start_date_str = match.group(1)
-        end_date_str = match.group(2)
-        date_range = f"({start_date_str})_({end_date_str})"
-    else:
-        print(f"Unable to extract date range from folder name: {folder_name}")
-        sys.exit(1)
+    $folderName = $latestWeekFolder.Name
+    $matches = [regex]::Match($folderName, '\((\d{2}\.\d{2}\.\d{2})\)_\((\d{2}\.\d{2}\.\d{2})\)')
+    if ($matches.Success) {
+        $startDateStr = $matches.Groups[1].Value
+        $endDateStr = $matches.Groups[2].Value
+        $dateRange = "($startDateStr)_($endDateStr)"
+    } else {
+        Write-Host "Unable to extract date range from folder name: $folderName" -ForegroundColor Red
+        exit 1
+    }
 
     # Construct the full path to the raw file
-    raw_file_path_pattern = os.path.join(
-        latest_week_folder, "1.Gathering_Data", "RS", "RAW_EDI_RS_*.csv"
-    )
+    $rawFilePathPattern = Join-Path -Path $latestWeekFolder.FullName -ChildPath "1.Gathering_Data\RS\RAW_EDI_RS_*.csv"
 
     # Get the most recent raw file in the folder
-    raw_files = glob.glob(raw_file_path_pattern)
-    if raw_files:
-        latest_raw_file = max(raw_files, key=os.path.getmtime)
-        print(f"Using raw file: {latest_raw_file}")
+    $latestRawFile = Get-ChildItem -Path $rawFilePathPattern | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 
+    if ($latestRawFile) {
+        Write-Host "Using raw file: $($latestRawFile.FullName)" -ForegroundColor Green
+        
         # Import CSV files
-        with open(latest_raw_file, mode='r', newline='', encoding='utf-8-sig') as raw_file:
-            filtered_data = list(csv.DictReader(raw_file))
+        $filteredData = Import-Csv -Path $latestRawFile.FullName
+        $customerList = Import-Csv -Path $customerListPath
 
-        with open(customer_list_path, mode='r', newline='', encoding='utf-8-sig') as customer_file:
-            customer_list = list(csv.DictReader(customer_file))
-
-        # Create a dictionary for customer lookup
-        customer_dict = {cust['Customer Id']: cust for cust in customer_list}
-
-        report_data = []
-        for current_row in filtered_data:
-            carrier = current_row.get('Carrier', '')
-            customer_no = current_row.get('Customer #', '')
-            carrier_inv_no = current_row.get('Carrier Inv. #', '')
-            try:
-                customer_no_value = float(customer_no)
-            except ValueError:
-                continue  # Skip if Customer # is not a number
-
-            if (
-                carrier == "DHL" and
-                customer_no_value < 50000000 and
-                not carrier_inv_no.startswith('D')
-            ):
-                customer = customer_dict.get(customer_no)
-                if customer:
+        $reportData = $filteredData | 
+            Where-Object { 
+                $_.Carrier -eq "DHL" -and 
+                [double]$_.'Customer #' -lt 50000000 -and
+                -not ($_.'Carrier Inv. #' -like 'D*')  # Exclude entries where Carrier Inv. # starts with "D"
+            } | 
+            ForEach-Object {
+                $currentRow = $_
+                $customer = $customerList | Where-Object { $_.'Customer Id' -eq $currentRow.'Customer #' } | Select-Object -First 1
+                
+                if ($customer) {
                     # Extract last 8 characters of Invoice Number for INV NO
-                    invoice_number = current_row.get('Invoice Number', '')
-                    if invoice_number:
-                        inv_no = invoice_number[-8:]
-                    else:
-                        inv_no = "N/A"
-
+                    $invNo = if ($currentRow.'Invoice Number') { $currentRow.'Invoice Number'[-8..-1] -join '' } else { "N/A" }
+                    
                     # Convert INV NO to date
-                    converted_date = convert_to_date(inv_no)
-
+                    $convertedDate = ConvertTo-Date -invNo $invNo
+                    
                     # Use the Ship Date for MEMO INV ITEM
-                    ship_date_string = current_row.get('Ship Date', 'N/A')
-
-                    memo_inv_item = f"{carrier} | AIRBILL# {current_row.get('Airbill Number', '')} | DATE {ship_date_string}"
-
-                    # TERMS: Use first two digits of 'Inv Terms'
-                    inv_terms = customer.get('Inv Terms', '')
-                    terms = f"NET {inv_terms[:2]}" if inv_terms else "NET"
-
-                    report_row = {
-                        'CUST NO': customer_no,
-                        'INV NO': inv_no,
-                        'CUSTOMER': customer.get('Customer', ''),
-                        'MEMO INV ITEM': memo_inv_item,
-                        'DATE': converted_date,
-                        'TERMS': terms,
-                        'ACCOUNT': "DHL SALES",
-                        'AMOUNT': current_row.get('Customer Total', ''),
-                        'REP': customer.get('Customer Salesrep', ''),
+                    $shipDateString = if ($currentRow.'Ship Date') { $currentRow.'Ship Date' } else { "N/A" }
+                    
+                    [PSCustomObject]@{
+                        'CUST NO' = $currentRow.'Customer #'
+                        'INV NO' = $invNo
+                        'CUSTOMER' = $customer.'Customer'
+                        'MEMO INV ITEM' = "$($currentRow.'Carrier') | AIRBILL# $($currentRow.'Airbill Number') | DATE $shipDateString"
+                        'DATE' = $convertedDate  # Use converted date from INV NO
+                        'TERMS' = "NET $($customer.'Inv Terms'[0..1] -join '')"  # Use first two digits of Inv Terms
+                        'ACCOUNT' = "DHL SALES"
+                        'AMOUNT' = $currentRow.'Customer Total'
+                        'REP' = $customer.'Customer Salesrep'
                     }
-                    report_data.append(report_row)
-                else:
-                    print(f"Customer not found for Customer #: {customer_no}")
+                } else {
+                    Write-Host "Customer not found for Customer #: $($currentRow.'Customer #')" -ForegroundColor Yellow
+                }
+            }
+
         # Define output folder path
-        output_folder_path = os.path.join(
-            latest_week_folder, '4.QB_Report', 'ILS (DHL)'
-        )
+        $outputFolderPath = Join-Path -Path $latestWeekFolder.FullName -ChildPath '4.QB_Report\ILS (DHL)'
 
         # Ensure the output directory exists
-        os.makedirs(output_folder_path, exist_ok=True)
+        if (-not (Test-Path -Path $outputFolderPath)) {
+            New-Item -Path $outputFolderPath -ItemType Directory -Force | Out-Null
+        }
 
         # Define output file name
-        output_file_name = f"ILS EDI ROCKSOLID INVOICES & INCOME_{date_range}.csv"
+        $outputFileName = "ILS EDI ROCKSOLID INVOICES & INCOME_$dateRange.csv"
 
         # Define output file path
-        output_file_path = os.path.join(output_folder_path, output_file_name)
+        $outputFilePath = Join-Path -Path $outputFolderPath -ChildPath $outputFileName
 
-        # Export data to CSV
-        fieldnames = [
-            'CUST NO', 'INV NO', 'CUSTOMER', 'MEMO INV ITEM', 'DATE',
-            'TERMS', 'ACCOUNT', 'AMOUNT', 'REP'
-        ]
-        with open(output_file_path, mode='w', newline='', encoding='utf-8-sig') as output_file:
-            writer = csv.DictWriter(output_file, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(report_data)
+        # Export data to CSV, using -Force to overwrite existing file
+        $reportData | Export-Csv -Path $outputFilePath -NoTypeInformation -Force
 
-        print(f"Filtered report exported to: {output_file_path}")
-        print("Script completed successfully.")
+        Write-Host "Filtered report exported to: $outputFilePath" -ForegroundColor Green
+        Write-Host "Script completed successfully." -ForegroundColor Green
 
         # Display summary of problematic data
-        invalid_dates = [row for row in report_data if row['DATE'] in ('Invalid Date', 'N/A')]
-        if invalid_dates:
-            print("\nWarning: Some records have invalid or missing dates:")
-            for row in invalid_dates:
-                print(f"Customer: {row['CUST NO']}, Invoice: {row['INV NO']}, Date: {row['DATE']}")
+        $invalidDates = $reportData | Where-Object { $_.'DATE' -eq 'Invalid Date' -or $_.'DATE' -eq 'N/A' }
+        if ($invalidDates) {
+            Write-Host "`nWarning: Some records have invalid or missing dates:" -ForegroundColor Yellow
+            $invalidDates | ForEach-Object {
+                Write-Host "Customer: $($_.'CUST NO'), Invoice: $($_.'INV NO'), Date: $($_.'DATE')" -ForegroundColor Yellow
+            }
+        }
 
-        missing_invoices = [row for row in report_data if row['INV NO'] == 'N/A']
-        if missing_invoices:
-            print("\nWarning: Some records have missing invoice numbers:")
-            for row in missing_invoices:
-                print(f"Customer: {row['CUST NO']}, Date: {row['DATE']}")
-
-    else:
-        print("No raw file found in the latest week folder.")
-else:
-    print("No week folders found in the specified directory.")
+        $missingInvoices = $reportData | Where-Object { $_.'INV NO' -eq 'N/A' }
+        if ($missingInvoices) {
+            Write-Host "`nWarning: Some records have missing invoice numbers:" -ForegroundColor Yellow
+            $missingInvoices | ForEach-Object {
+                Write-Host "Customer: $($_.'CUST NO'), Date: $($_.'DATE')" -ForegroundColor Yellow
+            }
+        }
+    } else {
+        Write-Host "No raw file found in the latest week folder." -ForegroundColor Red
+    }
+} else {
+    Write-Host "No week folders found in the specified directory." -ForegroundColor Red
+}
