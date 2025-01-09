@@ -10,18 +10,42 @@ raw_file_base_path = Path(r"C:\Users\User\Desktop\JEAV\EDI Reconcile (monday)")
 
 # Function to get the most recent week folder
 def get_latest_week_folder(base_path):
-    week_folders = [f for f in base_path.iterdir() if f.is_dir() and re.match(r'^Week_\d+_\(\d{2}\.\d{2}\.\d{2}\)_\(\d{2}\.\d{2}\.\d{2}\)$', f.name)]
-    if week_folders:
-        return max(week_folders, key=lambda f: f.stat().st_mtime)
-    return None
+    pattern = re.compile(r'^Week_\d+_\(\d{2}\.\d{2}\.\d{2}\)_\(\d{2}\.\d{2}\.\d{2}\)$')
+    folders = []
+    for entry in os.listdir(base_path):
+        full_path = os.path.join(base_path, entry)
+        if os.path.isdir(full_path) and pattern.match(entry):
+            folders.append((full_path, os.path.getmtime(full_path)))
+    if folders:
+        # Sort folders by last modified time in descending order
+        latest_folder = sorted(folders, key=lambda x: x[1], reverse=True)[0][0]
+        return Path(latest_folder)  # Convert string to Path object if you prefer
+    else:
+        return None
 
-# Function to convert INV NO to date
+# Function to convert INV NO to date with adjusted month letters
 def convert_to_date(inv_no):
     if inv_no == "N/A":
         return "N/A"
-    
-    # Placeholder conversion logic, replace with actual logic as needed
-    return "ConvertedDatePlaceholder"
+    date_code = inv_no[-4:]
+    year_letter = date_code[0]
+    month_letter = date_code[1]
+    day_str = date_code[2:]
+
+    # Calculate year based on the year letter
+    year = ord(year_letter) - ord('Y') + 2024
+
+    # Adjust for the skipped month 'I'
+    month = ord(month_letter) - ord('A') + 1
+    if month_letter >= 'J':
+        month -= 1  # If September or later, decrease month by 1
+
+    try:
+        day = int(day_str)
+        date_obj = datetime.date(year, month, day)
+        return date_obj.strftime("%m/%d/%Y")
+    except ValueError:
+        return "Invalid Date"
 
 # Get the latest week folder
 latest_week_folder = get_latest_week_folder(raw_file_base_path)
@@ -45,7 +69,6 @@ if latest_week_folder:
         print(f"Using raw file: {latest_raw_file}")
         
         # Import CSV files
-        filtered_data = []
         with open(latest_raw_file, newline='') as raw_file:
             raw_data = list(csv.DictReader(raw_file))
             
@@ -61,6 +84,7 @@ if latest_week_folder:
         
         report_data = []
         for row in filtered_data:
+            # Attempt to match row in the customer_list
             customer = next((c for c in customer_list if c['Customer Id'] == row['Customer #']), None)
 
             inv_no = row['Invoice Number'][-8:] if row['Invoice Number'] else "N/A"
@@ -68,6 +92,7 @@ if latest_week_folder:
 
             ship_date_string = row['Ship Date'] if row['Ship Date'] else "N/A"
             
+            # Determine account_value
             account_value = "OTHER SALES"
             if row['Carrier'] == "UPS":
                 account_value = "UPS SALES"
@@ -122,7 +147,6 @@ if latest_week_folder:
 
         print(f"Filtered report exported to: {output_file_path}")
         print("Script completed successfully.")
-
     else:
         print("No raw file found in the latest week folder.")
 else:
