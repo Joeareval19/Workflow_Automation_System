@@ -1,3 +1,7 @@
+
+
+
+
 from google.colab import drive
 drive.mount('/content/drive')
 
@@ -6,18 +10,20 @@ import re
 import csv
 import datetime
 from pathlib import Path
+import decimal
+
 
 # -------------------------------
 # Define Paths on Google Drive
 # -------------------------------
-customer_list_path = r"/content/drive/My Drive/LAMINAR AUTOMATON/Customer List.csv"
-raw_file_base_path = Path(r"/content/drive/My Drive/LAMINAR AUTOMATON/EDI_Upload/2025/")
+customer_list_path = r"/content/drive/My Drive/Drive Code/Customer List.csv"
+raw_file_base_path = Path(r"/content/drive/My Drive/Drive Code/EDI_Upload/2025/")
 
 # -------------------------------
 # Functions
 # -------------------------------
 def get_latest_week_folder(base_path):
-    week_folders = [f for f in base_path.iterdir() 
+    week_folders = [f for f in base_path.iterdir()
                     if f.is_dir() and re.match(r'^Week_\d+_\(\d{2}\.\d{2}\.\d{2}\)_\(\d{2}\.\d{2}\.\d{2}\)$', f.name)]
     if not week_folders:
         return None
@@ -83,7 +89,7 @@ if latest_week_folder:
     raw_folder_path = latest_week_folder / "1. Gathering"
     # Build the expected raw file name using the date range.
     input_file = raw_folder_path / f"RAW_EDI_RS_({start_date_str})_({end_date_str}).csv"
-    
+
     if not input_file.exists():
         print(f"Error: Input file not found: {input_file}")
         exit(1)
@@ -113,15 +119,41 @@ if latest_week_folder:
                 inv_no = row.get('Invoice Number', 'N/A')[-8:]
                 date_converted = convert_to_date(inv_no)
                 sub_carrier = row.get('Sub Carrier', '').strip() or ("RSIS" if carrier == "FedEx" else "")
-                
-                vendor = ("DESCARTES" if sub_carrier == "RSIS" 
-                          else "ENGLAND LOGISTICS" if sub_carrier == "England" 
-                          else f"{carrier} ENGLAND")
-                
-                airbill_number = row.get('Airbill Number') or row.get('Air Bill Number') or row.get('AirBill') or ""
-                airbill_number = airbill_number.strip()
-                memo_bill_item = f"{carrier} | AIRBILL# {airbill_number} | {row.get('Service Type', '')} | {sub_carrier}"
 
+                vendor = ("DESCARTES" if sub_carrier == "RSIS"
+                          else "ENGLAND LOGISTICS" if sub_carrier == "England"
+                          else f"{carrier} ENGLAND")
+
+                airbill_number_raw = row.get('Airbill Number') or row.get('Air Bill Number') or row.get('AirBill') or ""
+                airbill_number_raw = airbill_number_raw.strip()
+###########
+
+
+                # --- START: CORRECTED Handle scientific notation ---
+                airbill_number_formatted = airbill_number_raw # Default to raw value
+                if airbill_number_raw: # Only process if not empty
+                    try:
+                        # Use Decimal for accurate conversion from potential scientific notation
+                        dec_val = decimal.Decimal(str(airbill_number_raw)) # Ensure input is string
+
+                        # Convert Decimal to integer (truncates any decimal part), then to string.
+                        # This forces the full number representation without exponent.
+                        airbill_number_formatted = str(int(dec_val))
+
+                    except (ValueError, decimal.InvalidOperation, TypeError) as e:
+                        # If conversion fails (e.g., non-numeric "ABC123XYZ", empty string after strip),
+                        # keep the original raw value.
+                        # Optional: Log which specific values failed if needed for debugging
+                        # print(f"Debug: Row {row_index + 2}: Could not convert airbill '{airbill_number_raw}' to number: {e}")
+                        airbill_number_formatted = airbill_number_raw # Keep original on error
+                    except Exception as e: # Catch any other unexpected errors during conversion
+                         print(f"Warning: Row {row_index + 2}: Unexpected error converting airbill '{airbill_number_raw}': {e}")
+                         airbill_number_formatted = airbill_number_raw # Fallback to original
+                # --- END: CORRECTED Handle scientific notation ---
+
+                # Construct the memo field using the potentially formatted airbill number
+                service_type = row.get('Service Type', '') # Get service type
+                memo_bill_item = f"{carrier} | AIRBILL# {airbill_number_formatted} | {service_type} | {sub_carrier}"
                 report_data.append({
                     'DATE': date_converted,
                     'CUST NO': cust_no,
@@ -136,7 +168,7 @@ if latest_week_folder:
             else:
                 print(f"Customer not found: {cust_no}")
 
-    sorted_report = sorted(report_data, key=lambda x: int(x['BILL NO']))
+    sorted_report = sorted(report_data, key=lambda x: str(x['BILL NO']))
 
     # -------------------------------
     # Export the Report
