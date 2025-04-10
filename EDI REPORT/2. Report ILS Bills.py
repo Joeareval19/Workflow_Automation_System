@@ -17,8 +17,8 @@ from datetime import datetime
 # -------------------------------
 
 # Adjust the customer list file path as needed.
-customer_list_path = "/content/drive/My Drive/LAMINAR AUTOMATON/Customer List.csv"
-base_path = "/content/drive/My Drive/LAMINAR AUTOMATON/EDI_Upload/2025/"
+customer_list_path = "/content/drive/My Drive/Drive Code/Customer List.csv"
+base_path = "/content/drive/My Drive/Drive Code/EDI_Upload/2025/"
 
 # Check if base path exists
 if not os.path.exists(base_path):
