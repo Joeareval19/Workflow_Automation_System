@@ -12,8 +12,8 @@ from datetime import datetime
 # -------------------------------
 
 # Use the same base folder as in your first script
-base_path = "/content/drive/My Drive/LAMINAR AUTOMATON/EDI_Upload/2025/"
-customer_list_path = "/content/drive/My Drive/LAMINAR AUTOMATON/Customer List.csv"
+base_path = "/content/drive/My Drive/Drive Code/EDI_Upload/2025/"
+customer_list_path = "/content/drive/My Drive/Drive Code/Customer List.csv"
 
 if not os.path.exists(base_path):
     print(f"Error: Base path does not exist: {base_path}")
@@ -122,7 +122,7 @@ for current_row in raw_data:
     carrier = current_row.get('Carrier', '')
     customer_no = current_row.get('Customer #', '')
     carrier_inv_no = current_row.get('Carrier Inv. #', '')
-    
+
     try:
         customer_no_value = float(customer_no)
     except ValueError:
@@ -133,25 +133,25 @@ for current_row in raw_data:
     #  - Carrier is "DHL"
     #  - Customer # is less than 50,000,000
     #  - Carrier Inv. # does not start with 'D'
-    if (carrier == "DHL" and 
-        customer_no_value < 50000000 and 
+    if (carrier == "DHL" and
+        customer_no_value < 50000000 and
         not carrier_inv_no.startswith('D')):
-        
+
         customer = customer_dict.get(customer_no)
         if customer:
             # Extract last 8 characters of Invoice Number for INV NO
             invoice_number = current_row.get('Invoice Number', '')
             inv_no = invoice_number[-8:] if invoice_number else "N/A"
             converted_date = convert_to_date(inv_no)
-            
+
             # Use the Ship Date for MEMO INV ITEM
             ship_date_string = current_row.get('Ship Date', 'N/A')
             memo_inv_item = f"{carrier} | AIRBILL# {current_row.get('Airbill Number', '')} | DATE {ship_date_string}"
-            
+
             # TERMS: Use first two digits of 'Inv Terms' from the customer record
             inv_terms = customer.get('Inv Terms', '')
             terms = f"NET {inv_terms[:2]}" if inv_terms else "NET"
-            
+
             report_row = {
                 'CUST NO': customer_no,
                 'INV NO': inv_no,
