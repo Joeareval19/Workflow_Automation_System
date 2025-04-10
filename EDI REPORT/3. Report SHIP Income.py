@@ -1,3 +1,7 @@
+###(SHIP_INVOICE_REPORT)###
+
+
+
 
 from google.colab import drive
 drive.mount('/content/drive')
@@ -11,8 +15,8 @@ from pathlib import Path
 # -------------------------------
 # Define constant paths on Google Drive
 # -------------------------------
-customer_list_path = r"/content/drive/My Drive/LAMINAR AUTOMATON/Customer List.csv"
-raw_file_base_path = Path(r"/content/drive/My Drive/LAMINAR AUTOMATON/EDI_Upload/2025/")
+customer_list_path = r"/content/drive/My Drive/Drive Code/Customer List.csv"
+raw_file_base_path = Path(r"/content/drive/My Drive/Drive Code/EDI_Upload/2025/")
 
 # -------------------------------
 # Function to get the latest week folder based on the week number in its name
@@ -64,35 +68,35 @@ if latest_week_folder:
     else:
         print("Invalid folder naming convention.")
         exit(1)
-    
+
     # -------------------------------
     # Locate the raw file in "1. Gathering"
     # -------------------------------
     raw_folder_path = latest_week_folder / "1. Gathering"
     # Build the expected raw file name using the extracted dates.
     input_file = raw_folder_path / f"RAW_EDI_RS_({start_date_str})_({end_date_str}).csv"
-    
+
     if not input_file.exists():
         print(f"Error: Input file not found: {input_file}")
         exit(1)
-    
+
     print(f"Using raw file: {input_file}")
-    
+
     # -------------------------------
     # Read CSV data from the raw file and customer list
     # -------------------------------
     with open(input_file, newline='', encoding='utf-8-sig') as raw_file:
         raw_data = list(csv.DictReader(raw_file))
-    
+
     with open(customer_list_path, newline='', encoding='utf-8-sig') as customer_file:
         customer_list = list(csv.DictReader(customer_file))
-    
+
     filtered_data = [
         row for row in raw_data
         if row['Carrier'] in ["FedEx", "UPS", "FREIGHT"] and
            not (row['Customer #'].startswith("10003217") or row['Customer #'].startswith("10003324"))
     ]
-    
+
     report_data = []
     for row in filtered_data:
         customer = next((c for c in customer_list if c['Customer Id'] == row['Customer #']), None)
@@ -101,7 +105,7 @@ if latest_week_folder:
         ship_date = row['Ship Date'] if row['Ship Date'] else "N/A"
         carrier = row['Carrier']
         sub_carrier = row['Sub Carrier'].upper() if row.get('Sub Carrier') else ""
-        
+
         if carrier == "UPS":
             account = "UPS SALES"
         elif carrier == "FREIGHT":
@@ -110,17 +114,17 @@ if latest_week_folder:
             account = "FEDEX SALES (ENGLAND LOGISTICS)" if sub_carrier == "ENGLAND" else "FEDEX SALES (DESCARTE)"
         else:
             account = "OTHER SALES"
-        
+
         if carrier == "FREIGHT":
             memo_inv_item = f"FREIGHT (LTL) | AIRBILL# {row['Airbill Number']} | DATE {ship_date}"
         else:
             memo_inv_item = f"{carrier} | AIRBILL# {row['Airbill Number']} | DATE {ship_date}"
-        
+
         amount = sum(float(row.get(col, 0) or 0) for col in [
             'Customer Base', 'Chg 1 Total', 'Chg 2 Total', 'Chg 3 Total',
             'Chg 4 Total', 'Chg 5 Total', 'Chg 6 Total', 'Chg 7 Total', 'Chg 8 Total'
         ])
-        
+
         report_data.append({
             'CUST NO': row['Customer #'],
             'INV NO': inv_no,
@@ -132,7 +136,7 @@ if latest_week_folder:
             'AMOUNT': amount,
             'REP': customer['Customer Salesrep'] if customer else "N/A",
         })
-    
+
     # -------------------------------
     # Export the report to the proper folder structure
     # -------------------------------
@@ -141,14 +145,14 @@ if latest_week_folder:
     output_folder_path.mkdir(parents=True, exist_ok=True)
     output_file_name = f"SHIPIUM EDI ROCKSOLID UPS FedEx INVOICES & INCOME_{date_range}.csv"
     output_file_path = output_folder_path / output_file_name
-    
+
     with open(output_file_path, 'w', newline='', encoding='utf-8-sig') as output_file:
         writer = csv.DictWriter(output_file, fieldnames=[
             'CUST NO', 'INV NO', 'CUSTOMER', 'MEMO INV ITEM', 'DATE', 'TERMS', 'ACCOUNT', 'AMOUNT', 'REP'
         ])
         writer.writeheader()
         writer.writerows(report_data)
-    
+
     print(f"Filtered report exported to: {output_file_path}")
     print("Script completed successfully.")
 else:
