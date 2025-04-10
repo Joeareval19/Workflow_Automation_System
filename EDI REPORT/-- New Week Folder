@@ -1,105 +1,137 @@
-# Define the base path where the week folders are located
-$basePath = "C:\Users\User\Desktop\JEAV\EDI Reconcile (Monday)"
+# Mount your Google Drive for persistent storage in Colab
+from google.colab import drive
+drive.mount('/content/drive')
 
-# Define the format of the week folder name
-$folderNamePattern = "Week_{0}_({1})_({2})"
+import os
+import re
+import shutil
+from datetime import datetime, timedelta
 
-# Function to add days to a date string
-function Add-DaysToDate {
-    param (
-        [string]$dateStr,
-        [int]$days
-    )
-    $date = [datetime]::ParseExact($dateStr, "MM.dd.yy", $null)
-    $newDate = $date.AddDays($days)
-    return $newDate.ToString("MM.dd.yy")
-}
+# --- Configuration ---
+# Set the base path to the target folder on your Google Drive
+base_path = "/content/drive/My Drive/Drive Code/EDI_Upload/2025/"
+# Define the format for week folder names
+folder_name_pattern_str = r"^Week_(\d+)_\((\d{2}\.\d{2}\.\d{2})\)_\((\d{2}\.\d{2}\.\d{2})\)$"
+# Format string for creating new folder names
+folder_name_format = "Week_{0}_({1})_({2})"
+# Date format used in folder and file names
+date_format = "%m.%d.%y"
+# --- End Configuration ---
 
-# Function to update date within file names
-function Update-DateInFileName {
-    param (
-        [string]$fileName,
-        [string]$oldDateFormatStart,
-        [string]$oldDateFormatEnd,
-        [string]$newDateStart,
-        [string]$newDateEnd
-    )
-    $updatedFileName = $fileName -replace [regex]::Escape($oldDateFormatStart), $newDateStart
-    $updatedFileName = $updatedFileName -replace [regex]::Escape($oldDateFormatEnd), $newDateEnd
-    return $updatedFileName
-}
+# Ensure the base path exists
+os.makedirs(base_path, exist_ok=True)
 
-# Get the list of week folders in the base path
-$weekFolders = Get-ChildItem -Path $basePath -Directory | Where-Object { $_.Name -match "^Week_(\d+)_\((\d{2}\.\d{2}\.\d{2})\)_\((\d{2}\.\d{2}\.\d{2})\)$" }
+def update_date_in_filename(filename, old_start_date_str, old_end_date_str, new_start_date_str, new_end_date_str):
+    """Replaces old date strings with new date strings within a filename."""
+    # Escape dots for regex safety
+    old_start_date_pattern = re.escape(old_start_date_str)
+    old_end_date_pattern = re.escape(old_end_date_str)
+    # Replace old dates with new dates
+    updated_filename = re.sub(old_start_date_pattern, new_start_date_str, filename)
+    updated_filename = re.sub(old_end_date_pattern, new_end_date_str, updated_filename)
+    return updated_filename
 
-# Initialize variables for the new week number and date range
-$newWeekNumber = 1
-$newStartDate = Get-Date
-$newEndDate = $newStartDate.AddDays(6)
+# Compile regex pattern for efficiency
+pattern = re.compile(folder_name_pattern_str)
+week_folders = []
 
-# Initialize variable for the latest folder to copy from
-$latestFolderPath = ""
+# --- Scan Existing Week Folders ---
+print(f"Scanning for existing week folders in: {base_path}")
+for entry in os.listdir(base_path):
+    full_path = os.path.join(base_path, entry)
+    if os.path.isdir(full_path):
+        m = pattern.match(entry)
+        if m:
+            week_number = int(m.group(1))
+            start_date_str = m.group(2)
+            end_date_str = m.group(3)
+            week_folders.append({
+                'path': full_path,
+                'name': entry,
+                'week_number': week_number,
+                'start_date_str': start_date_str,
+                'end_date_str': end_date_str
+            })
 
-# Find the highest week number and get the latest folder to copy from
-foreach ($folder in $weekFolders) {
-    if ($folder.Name -match "Week_(\d+)_\((\d{2}\.\d{2}\.\d{2})\)_\((\d{2}\.\d{2}\.\d{2})\)$") {
-        $weekNumber = [int]$matches[1]
-        $endDate = [datetime]::ParseExact($matches[3], "MM.dd.yy", $null)
-        if ($weekNumber -ge $newWeekNumber) {
-            $newWeekNumber = $weekNumber + 1
-            # Calculate new start and end dates based on the last week's end date
-            $newStartDate = $endDate.AddDays(1)
-            $newEndDate = $newStartDate.AddDays(6)
-            $latestFolderPath = $folder.FullName
-        }
-    }
-}
+# --- Find the Latest Week Folder ---
+latest_folder = None
+if week_folders:
+    # Sort folders first by week number (desc), then by end date (desc)
+    week_folders.sort(key=lambda x: (x['week_number'], datetime.strptime(x['end_date_str'], date_format)), reverse=True)
+    latest_folder = week_folders[0] # The first item is the latest after sorting
+    print(f"Found latest folder: {latest_folder['name']}")
+else:
+    print("No existing week folders found.")
 
-# Adjust end date if it falls into the next month
-if ($newEndDate.Day -gt [datetime]::DaysInMonth($newEndDate.Year, $newEndDate.Month)) {
-    $newEndDate = [datetime]::ParseExact($newStartDate.ToString("yyyy-MM") + "-01", "yyyy-MM-dd", $null).AddMonths(1).AddDays(-1)
-}
+# --- Calculate New Week Details ---
+if latest_folder:
+    # Calculate based on the latest folder found
+    latest_end_date = datetime.strptime(latest_folder['end_date_str'], date_format)
+    new_week_number = latest_folder['week_number'] + 1
+    new_start_date = latest_end_date + timedelta(days=1)
+    new_end_date = new_start_date + timedelta(days=6)
+    # Store details from the latest folder needed for filename updates
+    latest_folder_path = latest_folder['path']
+    latest_folder_start_date_str = latest_folder['start_date_str']
+    latest_folder_end_date_str = latest_folder['end_date_str']
+else:
+    # Initialize for the very first week (Week 1)
+    print("Initializing for Week 1.")
+    new_week_number = 1
+    # Use current date as the start for the first week if none exist
+    # Using the specific date from your original output calculation for consistency example:
+    # If you want it to truly be based on today: new_start_date = datetime.now()
+    # Let's assume we want to recreate the *logic* that resulted in 04.24.25 start,
+    # which implies a previous end date of 04.23.25. If running today (Apr 3 2025)
+    # without previous folders, it *should* be Week 1 starting 04.03.25.
+    # We'll stick to the logic: Start Week 1 based on *today's* date.
+    new_start_date = datetime.now()
+    new_end_date = new_start_date + timedelta(days=6)
+    latest_folder_path = None # No previous folder to copy from
+    latest_folder_start_date_str = '' # No old dates to replace
+    latest_folder_end_date_str = ''
 
-# Format the new week number and date range
-$newStartDateString = $newStartDate.ToString("MM.dd.yy")
-$newEndDateString = $newEndDate.ToString("MM.dd.yy")
+# Format new dates as strings
+new_start_date_str = new_start_date.strftime(date_format)
+new_end_date_str = new_end_date.strftime(date_format)
 
-# Construct the new folder name
-$newFolderName = [string]::Format($folderNamePattern, $newWeekNumber, $newStartDateString, $newEndDateString)
+# --- Create New Folder ---
+new_folder_name = folder_name_format.format(new_week_number, new_start_date_str, new_end_date_str)
+new_folder_path = os.path.join(base_path, new_folder_name)
+print(f"Creating new folder: {new_folder_path}")
+os.makedirs(new_folder_path, exist_ok=True)
 
-# Define the full path for the new folder
-$newFolderPath = Join-Path -Path $basePath -ChildPath $newFolderName
+# --- Copy Contents and Update Filenames (if applicable) ---
+if latest_folder_path:
+    print(f"Copying contents from {latest_folder['name']} to {new_folder_name}...")
+    for dirpath, dirnames, filenames in os.walk(latest_folder_path):
+        # Calculate relative path from the source base
+        rel_path = os.path.relpath(dirpath, latest_folder_path)
+        # Construct destination directory path
+        dest_dir = os.path.join(new_folder_path, rel_path)
+        # Create destination subdirectory if it doesn't exist (needed for nested folders)
+        os.makedirs(dest_dir, exist_ok=True)
 
-# Create the new folder
-New-Item -Path $newFolderPath -ItemType Directory -Force
+        for filename in filenames:
+            src_file = os.path.join(dirpath, filename)
+            # Update the dates in the filename if they match the old week's dates
+            new_filename = update_date_in_filename(
+                filename,
+                latest_folder_start_date_str,
+                latest_folder_end_date_str,
+                new_start_date_str,
+                new_end_date_str
+            )
+            dest_file = os.path.join(dest_dir, new_filename)
+            shutil.copy2(src_file, dest_file) # copy2 preserves metadata
+    print("Copying and filename update complete.")
+else:
+    print("No previous folder found to copy contents from.")
 
-# Copy and rename contents from the latest folder to the new folder
-if ($latestFolderPath) {
-    Get-ChildItem -Path $latestFolderPath -Recurse | ForEach-Object {
-        $destPath = $_.FullName.Replace($latestFolderPath, $newFolderPath)
-        if ($_.PSIsContainer) {
-            New-Item -Path $destPath -ItemType Directory -Force
-        } else {
-            $newFileName = $_.Name
+# --- Final Output ---
+# The original script only printed one line at the end.
+# This version prints progress, but we can add the final summary line back if needed.
+print(f"Script finished. New folder created: {new_folder_path}")
 
-            # Update both start and end dates in file names using dynamic patterns
-            $oldStartDate = [datetime]::ParseExact($matches[2], "MM.dd.yy", $null).ToString("MM.dd.yy")
-            $oldEndDate = [datetime]::ParseExact($matches[3], "MM.dd.yy", $null).ToString("MM.dd.yy")
-
-            $newFileName = Update-DateInFileName -fileName $newFileName -oldDateFormatStart $oldStartDate -oldDateFormatEnd $oldEndDate -newDateStart $newStartDateString -newDateEnd $newEndDateString
-
-            $newFilePath = Join-Path -Path (Split-Path -Path $destPath -Parent) -ChildPath $newFileName
-
-            # Copy and rename file
-            Copy-Item -Path $_.FullName -Destination $newFilePath -Force
-        }
-    }
-}
-
-# Output results
-Write-Host "Created new folder and copied contents with updated names: $newFolderPath"
-
-# Log the creation
-$logFile = "C:\Users\User\Desktop\JEAV\EDI Reconcile (Monday)\logfile.txt"  # Change this path if necessary
-$timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-"$timestamp - Created new folder and copied contents with updated names: $newFolderPath" | Out-File -Append -FilePath $logFile
+# If you want the *exact* final print statement from the original:
+# print(f"Created new folder and copied contents with updated names: {new_folder_path}")
