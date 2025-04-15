@@ -1,8 +1,11 @@
 # LAMINAR
 
 Branch 1: 
+ 
   -Powershell code. (code draft)
+ 
   -Python code. (fast and efficient code) 
+ 
   -Google Colab code. (code that can be hosted on the drive and run by any user anywhere) 
   # Automated Data Transformation and Reporting System
 
